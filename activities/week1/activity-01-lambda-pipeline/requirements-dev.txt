@@ -1,0 +1,5 @@
+# Testing dependencies — not deployed to Lambda
+-r requirements.txt
+pytest>=8.0.0
+pytest-cov>=5.0.0
+moto[s3,sqs,dynamodb]>=5.0.0   # AWS service mocks for integration tests
