@@ -7,7 +7,7 @@ Run with:  pytest tests/ -v
 import json
 import os
 import sys
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
