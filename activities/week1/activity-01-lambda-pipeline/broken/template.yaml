@@ -1,0 +1,48 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  BROKEN — FossilRAG document ingestion pipeline.
+  Issues: no DLQ, no reserved concurrency, timeout too short,
+  batch size 1, no partial batch response, no cost tags.
+
+Resources:
+
+  # ❌ No DLQ — failed messages retry indefinitely until MessageRetentionPeriod expires
+  # ❌ VisibilityTimeout (30s) is less than Lambda timeout × 6 — messages reappear
+  #    while Lambda is still processing them, causing duplicate processing
+  DocumentQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: fossilrag-document-queue
+      VisibilityTimeout: 30
+
+  DocumentProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: fossilrag-document-processor
+      Handler: lambda_function.handler
+      Runtime: python3.12
+
+      # ❌ 3 seconds — will time out on any document larger than ~10KB
+      Timeout: 3
+
+      # ❌ No ReservedConcurrentExecutions — Lambda can spin up to account limit
+      #    (default 1000), hammering S3 and downstream services
+
+      # ❌ No environment variables — bucket names are hardcoded in code
+
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt DocumentQueue.Arn
+            # ❌ BatchSize: 1 — one Lambda invocation per message, very expensive
+            BatchSize: 1
+            # ❌ No FunctionResponseTypes — any single failure retries the whole batch
+
+      Policies:
+        - S3ReadPolicy:
+            BucketName: fossils-raw-bucket
+        - S3WritePolicy:
+            BucketName: fossils-silver-bucket
+      # ❌ No cost tags
