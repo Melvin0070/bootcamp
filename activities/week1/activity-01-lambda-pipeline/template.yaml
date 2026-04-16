@@ -1,0 +1,214 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  FIXED — FossilRAG document ingestion pipeline.
+  Serverless ETL: raw documents (S3) → cleaned text (S3 silver layer).
+  Fixes: batching, DLQ, reserved concurrency, partial batch response,
+  idempotency table, CloudWatch alarm, cost tags.
+
+# ---------------------------------------------------------------------------
+# Parameters — override at deploy time, never hardcode values
+# ---------------------------------------------------------------------------
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Deployment environment
+
+  ReservedConcurrency:
+    Type: Number
+    Default: 10
+    Description: >
+      Max simultaneous Lambda executions.
+      Protects S3 and DynamoDB from being overwhelmed.
+      Trade-off: lower = cheaper + safer; higher = more throughput.
+      Start at 10 for dev; tune upward in prod based on observed queue depth.
+
+  BatchSize:
+    Type: Number
+    Default: 10
+    Description: >
+      Number of SQS messages per Lambda invocation (1–10000).
+      Higher = fewer invocations = lower cost.
+      Lower = faster per-message latency.
+
+  BatchWindowSeconds:
+    Type: Number
+    Default: 30
+    Description: >
+      How long Lambda waits to fill a batch before invoking (0–300s).
+      Set to 0 for real-time; 30s for cost-optimised batch workloads.
+
+# ---------------------------------------------------------------------------
+# Globals — applied to all SAM functions unless overridden
+# ---------------------------------------------------------------------------
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]   # Graviton2 — same performance, ~20% cheaper
+    Layers: []
+
+Resources:
+
+  # -------------------------------------------------------------------------
+  # Dead Letter Queue
+  # Messages land here after MaxReceiveCount failed delivery attempts.
+  # Use this queue to inspect, replay, or alert on persistently broken docs.
+  # -------------------------------------------------------------------------
+  DocumentDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'fossilrag-document-dlq-${Environment}'
+      # Keep failed messages for 14 days — gives time to debug and replay
+      MessageRetentionPeriod: 1209600
+      Tags:
+        - Key: Project
+          Value: FossilRAG
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: ingestion
+
+  # -------------------------------------------------------------------------
+  # Main processing queue
+  # -------------------------------------------------------------------------
+  DocumentQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'fossilrag-document-queue-${Environment}'
+      # Rule: VisibilityTimeout >= 6 × Lambda timeout (AWS recommendation)
+      # Lambda timeout = 60s → VisibilityTimeout = 360s
+      # If the Lambda hasn't finished by then, SQS re-delivers the message.
+      # Setting it too low = duplicate processing.
+      VisibilityTimeout: 360
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DocumentDLQ.Arn
+        # After 3 failed receives, move to DLQ.
+        # 3 = enough retries for transient failures (cold start, brief S3 blip)
+        # without spinning forever on a truly broken message.
+        maxReceiveCount: 3
+      Tags:
+        - Key: Project
+          Value: FossilRAG
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: ingestion
+
+  # -------------------------------------------------------------------------
+  # Idempotency table — tracks already-processed documents
+  # -------------------------------------------------------------------------
+  IdempotencyTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'fossilrag-processed-docs-${Environment}'
+      BillingMode: PAY_PER_REQUEST   # no capacity planning needed
+      AttributeDefinitions:
+        - AttributeName: s3_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: s3_key
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true   # items auto-expire after 30 days (set in Lambda code)
+      Tags:
+        - Key: Project
+          Value: FossilRAG
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: ingestion
+
+  # -------------------------------------------------------------------------
+  # Document processor Lambda
+  # -------------------------------------------------------------------------
+  DocumentProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'fossilrag-document-processor-${Environment}'
+      Handler: lambda_function.handler
+      Timeout: 60   # enough for a ~1MB document; tune based on p99 latency
+
+      # Cap concurrent executions.
+      # Prevents Lambda from fan-out and overwhelming S3 / DynamoDB.
+      # Also acts as a cost guard — limits max spend per minute.
+      ReservedConcurrentExecutions: !Ref ReservedConcurrency
+
+      Environment:
+        Variables:
+          RAW_BUCKET: !Sub 'fossilrag-raw-${Environment}'
+          SILVER_BUCKET: !Sub 'fossilrag-silver-${Environment}'
+          IDEMPOTENCY_TABLE: !Ref IdempotencyTable
+          LOG_LEVEL: INFO
+
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt DocumentQueue.Arn
+            BatchSize: !Ref BatchSize
+            # Wait up to BatchWindowSeconds to fill a batch before invoking.
+            # Reduces invocation count and Lambda bill significantly at scale.
+            MaximumBatchingWindowInSeconds: !Ref BatchWindowSeconds
+            # CRITICAL: partial batch response.
+            # Without this, if record 3 of 10 fails, ALL 10 are retried.
+            # With this, only record 3 goes back to the queue.
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Sub 'fossilrag-raw-${Environment}'
+        - S3WritePolicy:
+            BucketName: !Sub 'fossilrag-silver-${Environment}'
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IdempotencyTable
+
+      Tags:
+        Project: FossilRAG
+        Environment: !Ref Environment
+        Component: ingestion
+
+  # -------------------------------------------------------------------------
+  # CloudWatch Alarm — DLQ depth
+  # Fires as soon as a single message lands in the DLQ.
+  # Hook this up to an SNS topic → Slack/email in prod.
+  # -------------------------------------------------------------------------
+  DLQDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'fossilrag-dlq-depth-${Environment}'
+      AlarmDescription: >
+        One or more documents failed processing after 3 retries.
+        Check the DLQ for the raw message and CloudWatch Logs for the error.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt DocumentDLQ.QueueName
+      Statistic: Sum
+      Period: 300        # evaluate every 5 minutes
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+# ---------------------------------------------------------------------------
+# Outputs — reference these in other stacks or CI/CD pipelines
+# ---------------------------------------------------------------------------
+Outputs:
+  DocumentQueueUrl:
+    Description: Send document processing requests to this queue
+    Value: !Ref DocumentQueue
+    Export:
+      Name: !Sub 'fossilrag-document-queue-url-${Environment}'
+
+  DocumentDLQUrl:
+    Description: Inspect / replay failed documents from this queue
+    Value: !Ref DocumentDLQ
+
+  ProcessorFunctionArn:
+    Description: ARN of the document processor Lambda
+    Value: !GetAtt DocumentProcessorFunction.Arn
