@@ -44,7 +44,7 @@ A CloudFormation template provisions resources that are massively over-provision
 
 - [x] Broken template preserved in `broken/template.yaml` with ❌ bug annotations
 - [x] Fixed template at root `template.yaml` with ✅ fix annotations
-- [x] 22 assertions across 5 test classes — all passing
+- [x] 30 assertions across 5 test classes — all passing
 - [x] Architecture doc with before/after diagrams, cost table, trade-off table, AWS setup guide
 - [x] All config via `.env.example` (no hardcoded values in resources)
 - [ ] 2–5 min video walkthrough (before/after)
@@ -53,7 +53,7 @@ A CloudFormation template provisions resources that are massively over-provision
 
 | Criterion | Evidence |
 |-----------|----------|
-| Code Correctness | ASG min/max/desired parameters; lifecycle hook HeartbeatTimeout=300s; ScheduledScaleDown sets DesiredCapacity=0; 22 tests pass |
+| Code Correctness | ASG min/max/desired parameters; lifecycle hook HeartbeatTimeout=300s; ScheduledScaleDown sets DesiredCapacity=0; 30 tests pass |
 | Problem Solving & Architecture | t3 vs m5 trade-off table; 98% cost reduction quantified; lifecycle hook drain flow diagrammed; Shopify/e-commerce real-world examples |
 | Code Quality | Zero hardcoded values in Resources; all configuration in Parameters; SSM-resolved AMI; IMDSv2 enforced |
 | PR Description | Before/after ASCII diagrams; 6-row fix table; cost comparison table; scheduled cron expressions explained |
