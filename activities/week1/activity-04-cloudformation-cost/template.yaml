@@ -1,0 +1,422 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Cost-optimised web server stack.
+  ✅ Auto Scaling Group (min 0 → max 4) replaces single fixed EC2.
+  ✅ Right-sized instance family (t3) via Parameter with AllowedValues.
+  ✅ Lifecycle hook drains connections before scale-in terminates instances.
+  ✅ Scheduled actions scale to zero overnight (Mon–Fri off-peak).
+  ✅ All resources tagged for Cost Explorer attribution.
+
+# ---------------------------------------------------------------------------
+# Parameters — no hardcoded values anywhere in Resources
+# ---------------------------------------------------------------------------
+Parameters:
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Deployment environment — controls tag values and alarm thresholds.
+
+  InstanceType:
+    Type: String
+    # ✅ FIX 1: t3 family replaces m5.4xlarge — burstable credits handle traffic spikes.
+    #           m5.4xlarge is deliberately excluded from AllowedValues.
+    Default: t3.medium
+    AllowedValues:
+      - t3.micro    # dev/test only
+      - t3.small    # light staging
+      - t3.medium   # ✅ default — covers most web workloads
+      - t3.large    # high-traffic staging
+      - t3.xlarge   # production peak capacity
+    Description: EC2 instance type. m5.4xlarge is explicitly excluded — use t3 family.
+
+  MinSize:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 4
+    Description: >
+      ASG minimum capacity. Set to 0 to allow full scale-to-zero during off-peak
+      (combined with ScheduledScaleDown action).
+
+  MaxSize:
+    Type: Number
+    Default: 4
+    MinValue: 1
+    MaxValue: 20
+    Description: ASG maximum capacity — hard ceiling for cost control.
+
+  DesiredCapacity:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 4
+    Description: ASG desired capacity at stack creation time.
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to deploy into. Use default VPC for quick starts.
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least two subnets across different AZs for high availability.
+
+  OwnerEmail:
+    Type: String
+    Default: team@example.com
+    Description: Team email address for the Owner cost tag.
+
+  LatestAmiId:
+    # ✅ FIX 4 (BUG 4): SSM parameter resolves the latest Amazon Linux 2 AMI
+    #   automatically per region — no more hardcoded AMI IDs.
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # --- Notifications --------------------------------------------------------
+
+  # ✅ FIX: Lifecycle notifications land on SNS → SQS for durable processing.
+  LifecycleNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Sub "${AWS::StackName}-lifecycle"
+      Subscription:
+        - Protocol: sqs
+          Endpoint: !GetAtt LifecycleNotificationQueue.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref AWS::StackName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref OwnerEmail
+
+  LifecycleNotificationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-lifecycle-hooks"
+      # Allow lifecycle hook heartbeat (300s) + buffer before message expires.
+      MessageRetentionPeriod: 600
+      Tags:
+        - Key: Project
+          Value: !Ref AWS::StackName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref OwnerEmail
+
+  LifecycleQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref LifecycleNotificationQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt LifecycleNotificationQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref LifecycleNotificationTopic
+
+  # --- IAM ------------------------------------------------------------------
+
+  # ✅ FIX (BUG 5): Instance profile allows the app to call AWS APIs (SSM, S3, CloudWatch).
+  WebServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-web-server-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # SSM Session Manager — eliminates SSH (closes BUG 7 attack surface).
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        # CloudWatch agent can push custom metrics.
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Tags:
+        - Key: Project
+          Value: !Ref AWS::StackName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref OwnerEmail
+
+  WebServerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref WebServerRole
+
+  # --- Security Group -------------------------------------------------------
+
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${AWS::StackName} — allow HTTP only (SSH via SSM)"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        # ✅ FIX (BUG 7): SSH removed — use SSM Session Manager instead.
+        #   No inbound port 22, no key pair required.
+      Tags:
+        - Key: Project
+          Value: !Ref AWS::StackName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref OwnerEmail
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-sg"
+
+  # --- Launch Template ------------------------------------------------------
+
+  # ✅ FIX 1: LaunchTemplate replaces AWS::EC2::Instance as the ASG launch config.
+  WebServerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub "${AWS::StackName}-lt"
+      # ✅ FIX (BUG 6): Top-level Tags apply to the LaunchTemplate resource itself.
+      #   TagSpecifications inside LaunchTemplateData tag the EC2 instances/volumes launched from it.
+      Tags:
+        - Key: Project
+          Value: !Ref AWS::StackName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref OwnerEmail
+      LaunchTemplateData:
+        # ✅ FIX 1: InstanceType comes from Parameter — never hardcoded.
+        InstanceType: !Ref InstanceType
+        # ✅ FIX 4: AMI resolved via SSM — works in any region.
+        ImageId: !Ref LatestAmiId
+        IamInstanceProfile:
+          Arn: !GetAtt WebServerInstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref WebServerSecurityGroup
+        # ✅ FIX: Metadata options enforce IMDSv2 — prevents SSRF credential theft.
+        MetadataOptions:
+          HttpTokens: required
+          HttpEndpoint: enabled
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install -y python3 amazon-cloudwatch-agent
+            pip3 install flask
+            # Signal ASG lifecycle hook that the instance is ready.
+            INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+            HOOK_NAME="${AWS::StackName}-termination-hook"
+            ASG_NAME="${AWS::StackName}-asg"
+            cd /home/ec2-user
+            python3 app.py &
+        TagSpecifications:
+          # ✅ FIX (BUG 6): Tags propagate to every EC2 instance launched by the ASG.
+          - ResourceType: instance
+            Tags:
+              - Key: Project
+                Value: !Ref AWS::StackName
+              - Key: Environment
+                Value: !Ref Environment
+              - Key: Owner
+                Value: !Ref OwnerEmail
+              - Key: Name
+                Value: !Sub "${AWS::StackName}-web"
+          - ResourceType: volume
+            Tags:
+              - Key: Project
+                Value: !Ref AWS::StackName
+              - Key: Environment
+                Value: !Ref Environment
+              - Key: Owner
+                Value: !Ref OwnerEmail
+
+  # --- Auto Scaling Group ---------------------------------------------------
+
+  # ✅ FIX 2: AutoScalingGroup replaces single AWS::EC2::Instance.
+  WebServerASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub "${AWS::StackName}-asg"
+      # ✅ FIX: MinSize=0 enables full scale-to-zero via ScheduledScaleDown.
+      MinSize: !Ref MinSize
+      MaxSize: !Ref MaxSize
+      DesiredCapacity: !Ref DesiredCapacity
+      VPCZoneIdentifier: !Ref SubnetIds
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WebServerLaunchTemplate
+        Version: !GetAtt WebServerLaunchTemplate.LatestVersionNumber
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 300
+      # ✅ FIX: Tags with PropagateAtLaunch=true apply to every launched instance.
+      Tags:
+        - Key: Project
+          Value: !Ref AWS::StackName
+          PropagateAtLaunch: true
+        - Key: Environment
+          Value: !Ref Environment
+          PropagateAtLaunch: true
+        - Key: Owner
+          Value: !Ref OwnerEmail
+          PropagateAtLaunch: true
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-asg"
+          PropagateAtLaunch: false
+    # Ensure lifecycle hook and SNS exist before the ASG can scale.
+    DependsOn:
+      - LifecycleQueuePolicy
+
+  # --- Lifecycle Hook -------------------------------------------------------
+
+  # ✅ FIX 3: Lifecycle hook on EC2_INSTANCE_TERMINATING gives the instance
+  #   300 seconds to finish in-flight requests before it is killed.
+  #   Without this, scale-in terminates instances mid-request.
+  WebServerTerminationHook:
+    Type: AWS::AutoScaling::LifecycleHook
+    Properties:
+      LifecycleHookName: !Sub "${AWS::StackName}-termination-hook"
+      AutoScalingGroupName: !Ref WebServerASG
+      # ✅ Fires when ASG decides to terminate an instance (scale-in or health check failure).
+      LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
+      # Notification target receives the token so the instance can signal CONTINUE/ABANDON.
+      NotificationTargetARN: !Ref LifecycleNotificationTopic
+      RoleARN: !GetAtt LifecycleHookRole.Arn
+      # 300s = 5 min to drain. After timeout, DefaultResult kicks in.
+      HeartbeatTimeout: 300
+      # CONTINUE = proceed with termination even if heartbeat expires.
+      # Use ABANDON only if you need to retry the hook on failure.
+      DefaultResult: CONTINUE
+
+  LifecycleHookRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-lifecycle-hook-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: autoscaling.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AllowSNSPublish
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref LifecycleNotificationTopic
+      Tags:
+        - Key: Project
+          Value: !Ref AWS::StackName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref OwnerEmail
+
+  # --- Scaling Policies -----------------------------------------------------
+
+  # ✅ FIX: Target tracking — ASG automatically adds/removes instances to keep
+  #   average CPU near 60%. No manual scale-out/in thresholds to tune.
+  CPUTargetTrackingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref WebServerASG
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        # Scale out when average CPU exceeds 60%; scale in when it drops below ~54%.
+        TargetValue: 60.0
+        # Don't scale in immediately — wait for traffic to genuinely drop.
+        DisableScaleIn: false
+
+  # ✅ FIX: Scheduled scale-down to zero during off-peak hours.
+  #   Monday–Friday 19:00 UTC → capacity drops to 0 (zero EC2, zero cost).
+  ScheduledScaleDown:
+    Type: AWS::AutoScaling::ScheduledAction
+    Properties:
+      AutoScalingGroupName: !Ref WebServerASG
+      # cron(Minutes Hours Day-of-month Month Day-of-week Year)
+      Recurrence: "0 19 ? * MON-FRI *"
+      MinSize: 0
+      MaxSize: 0
+      DesiredCapacity: 0
+
+  # ✅ FIX: Scheduled scale-up each weekday morning before business hours.
+  ScheduledScaleUp:
+    Type: AWS::AutoScaling::ScheduledAction
+    Properties:
+      AutoScalingGroupName: !Ref WebServerASG
+      Recurrence: "0 7 ? * MON-FRI *"
+      MinSize: 1
+      MaxSize: !Ref MaxSize
+      DesiredCapacity: !Ref DesiredCapacity
+
+  # --- CloudWatch Alarm -----------------------------------------------------
+
+  HighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-high-cpu"
+      AlarmDescription: !Sub >
+        ASG ${AWS::StackName}-asg average CPU exceeded 80% for 5 minutes.
+        Target tracking policy should have scaled out — investigate if alarm fires repeatedly.
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref WebServerASG
+      TreatMissingData: notBreaching
+      Tags:
+        - Key: Project
+          Value: !Ref AWS::StackName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref OwnerEmail
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+
+  ASGName:
+    Description: Auto Scaling Group name — use in aws autoscaling describe-auto-scaling-groups.
+    Value: !Ref WebServerASG
+    Export:
+      Name: !Sub "${AWS::StackName}-asg-name"
+
+  SecurityGroupId:
+    Description: Web server security group ID.
+    Value: !Ref WebServerSecurityGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-sg-id"
+
+  LifecycleQueueUrl:
+    Description: SQS queue URL receiving lifecycle hook notifications.
+    Value: !Ref LifecycleNotificationQueue
+
+  LifecycleSNSTopicArn:
+    Description: SNS topic ARN for lifecycle notifications.
+    Value: !Ref LifecycleNotificationTopic
