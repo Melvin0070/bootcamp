@@ -1,0 +1,59 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Web server stack — initial "lift and shift" from on-prem.
+  BUG: single oversized EC2 running 24/7 with no scaling, no tags, no lifecycle management.
+
+# ❌ BUG 1: No Parameters block — every value is hardcoded in Resources.
+#           Changing instance type requires editing the template itself.
+
+Resources:
+
+  # ❌ BUG 2: AWS::EC2::Instance is a single fixed server.
+  #           There is no Auto Scaling Group, so capacity is static.
+  #           If traffic spikes, the server is overwhelmed.
+  #           If traffic drops to zero overnight, the server still runs and bills.
+  WebServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      # ❌ BUG 3: m5.4xlarge = 16 vCPU / 64 GB RAM = $0.768/hr = $552/mo.
+      #           The workload is a simple Flask app that peaks at ~10% CPU.
+      #           A t3.medium (2 vCPU / 4 GB) costs $0.0416/hr — 18× cheaper.
+      InstanceType: m5.4xlarge
+      # ❌ BUG 4: Hardcoded AMI ID — region-specific and will break on any other region.
+      ImageId: ami-0c02fb55956c7d316
+      SecurityGroups:
+        - !Ref WebServerSecurityGroup
+      # ❌ BUG 5: No IAM instance profile — the app cannot access S3, SSM, or CloudWatch.
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          yum update -y
+          yum install -y python3
+          pip3 install flask
+          cd /home/ec2-user
+          python3 app.py &
+      # ❌ BUG 6: No Tags — AWS Cost Explorer cannot attribute this spend to any team/project.
+      #           Finance cannot tell which team owns this $552/mo bill.
+
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP and SSH
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          # ❌ BUG 7: SSH open to the entire internet (0.0.0.0/0).
+          CidrIp: 0.0.0.0/0
+      # ❌ BUG 6 (cont): SecurityGroup also has no Tags.
+
+# ❌ BUG 8: No Outputs block — stack users cannot discover the instance ID,
+#           public IP, or security group ID without reading the template.
+
+# COST SUMMARY (us-east-1, on-demand):
+#   m5.4xlarge × 24h × 30d = $552.96/mo
+#   Zero scaling, zero cost visibility, zero graceful shutdown.
