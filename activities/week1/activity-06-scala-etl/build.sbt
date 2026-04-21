@@ -6,6 +6,11 @@ lazy val root = (project in file("."))
   .settings(
     name := "specimen-etl",
     Compile / scalaSource := baseDirectory.value,
+    Compile / unmanagedSources := {
+      val sources = (Compile / unmanagedSources).value
+      val brokenDir = (baseDirectory.value / "broken").getCanonicalPath + java.io.File.separator
+      sources.filterNot(_.getCanonicalPath.startsWith(brokenDir))
+    },
     libraryDependencies ++= Seq(
       "org.apache.spark" %% "spark-core"     % "3.5.1" % Provided,
       "org.apache.spark" %% "spark-sql"      % "3.5.1" % Provided,
