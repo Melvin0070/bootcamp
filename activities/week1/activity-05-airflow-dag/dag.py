@@ -102,8 +102,8 @@ def _send_slack_alert(context: dict) -> None:
         )
         resp.raise_for_status()
         logger.info("Slack alert sent", extra={"task_id": "on_failure_callback"})
-    except Exception as exc:
-        logger.error("Slack alert failed: %s", exc, extra={"task_id": "on_failure_callback"})
+    except Exception:
+        logger.exception("Slack alert failed", extra={"task_id": "on_failure_callback"})
 
 
 def _send_email_alert(context: dict) -> None:
