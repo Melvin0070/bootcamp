@@ -178,10 +178,16 @@ object SpecimenETL {
     validateSchema(raw)
     val withDefaults = applyContract(raw)
     val enriched = enrich(withDefaults)
-    val rowCount = enriched.count()
-    logger.info(s"event=write_start rows=$rowCount path=$OUTPUT_PATH")
-    enriched.write.mode("overwrite").parquet(OUTPUT_PATH)
-    logger.info(s"event=etl_complete status=success rows=$rowCount")
+    val cachedEnriched = enriched.cache()
+
+    try {
+      val rowCount = cachedEnriched.count()
+      logger.info(s"event=write_start rows=$rowCount path=$OUTPUT_PATH")
+      cachedEnriched.write.mode("overwrite").parquet(OUTPUT_PATH)
+      logger.info(s"event=etl_complete status=success rows=$rowCount")
+    } finally {
+      cachedEnriched.unpersist()
+    }
   }
 
   def main(args: Array[String]): Unit = {
