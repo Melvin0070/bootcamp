@@ -147,14 +147,16 @@ object SpecimenETL {
     }
   }
 
-  /** Allow exact match or safe widening (e.g. Int → Long, Float → Double). */
+  /** Allow exact match or safe widening of the actual type versus the contract
+   *  (e.g. contract Int with actual Long, contract Float with actual Double).
+   */
   def isCompatibleType(actual: DataType, expected: DataType): Boolean =
     (actual, expected) match {
       case (a, b) if a == b                           => true
-      case (IntegerType, LongType)                    => true
-      case (IntegerType, DoubleType)                  => true
-      case (LongType,    DoubleType)                  => true
-      case (FloatType,   DoubleType)                  => true
+      case (LongType,    IntegerType)                 => true
+      case (DoubleType,  IntegerType)                 => true
+      case (DoubleType,  LongType)                    => true
+      case (DoubleType,  FloatType)                   => true
       case _                                          => false
     }
 
