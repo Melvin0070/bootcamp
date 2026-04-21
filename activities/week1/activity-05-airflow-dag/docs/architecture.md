@@ -54,7 +54,7 @@ Airflow Scheduler
 │  on_failure_callback             │
 │  ├── Slack webhook (requests)    │
 │  └── Email (smtplib)             │
-│  Both channels tried in parallel │
+│  Best-effort: both attempted     │
 └──────────────────────────────────┘
         │ on success (≤ 3 retries)
         ▼
