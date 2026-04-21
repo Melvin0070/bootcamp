@@ -79,7 +79,7 @@ activity-06-scala-etl/
 
 ## PR Checklist
 
-- [x] Fix applied in `broken/SpecimenETL.scala` → working `SpecimenETL.scala` committed
+- [x] Anti-patterns preserved in `broken/SpecimenETL.scala`; working implementation committed in `SpecimenETL.scala`
 - [x] `.env.example` documents every environment variable
 - [x] 38 pytest assertions cover both broken anti-patterns and every fix
 - [x] `docs/architecture.md` — before/after diagrams, trade-off table, edge cases, evolution policy
