@@ -125,7 +125,12 @@ def _send_email_alert(context: dict) -> None:
             smtp.sendmail(msg["From"], [ALERT_EMAIL], msg.as_string())
         logger.info("Email alert sent to %s", ALERT_EMAIL, extra={"task_id": "on_failure_callback"})
     except Exception as exc:
-        logger.error("Email alert failed: %s", exc, extra={"task_id": "on_failure_callback"})
+        logger.error(
+            "Email alert failed: %s",
+            exc,
+            extra={"task_id": "on_failure_callback"},
+            exc_info=True,
+        )
 
 
 def on_failure_callback(context: dict) -> None:
