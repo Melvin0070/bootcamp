@@ -1,0 +1,42 @@
+# Pre-commit hooks to stop secrets reaching the repo.
+#
+# Install once:    pip install pre-commit && pre-commit install
+# Run on demand:   pre-commit run --all-files
+#
+# Two scanners in series — they catch overlapping but not identical sets,
+# and the cost of running both on a typical commit is <1 s.
+
+repos:
+  # Detect-secrets — entropy + plugin-based pattern detection. Maintained
+  # by Yelp; the de-facto standard for "did anything secret-shaped change".
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+        # Skip the broken/ folder which intentionally contains FAKE
+        # placeholder strings for didactic purposes.
+        exclude: |
+          (?x)^(
+            broken/.*|
+            .*\.lock|
+            .*\.svg|
+            tests/.*
+          )$
+
+  # Gitleaks — Go-based secret scanner with a curated rule set. Catches
+  # things detect-secrets misses (Slack tokens, GH PATs, JWTs).
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # Stop accidental commits of large binaries / .env files.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: detect-aws-credentials
+        args: ["--allow-missing-credentials"]
+      - id: detect-private-key
