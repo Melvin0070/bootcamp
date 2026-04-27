@@ -77,6 +77,22 @@ class TestNormalise:
         pipeline.normalise(df)
         pd.testing.assert_frame_equal(df, before)
 
+    def test_none_species_does_not_become_string_none(self):
+        # Regression: an earlier version did astype(str) BEFORE dropna,
+        # so None survived as the literal string "none" on Linux/older
+        # pandas. Pin the contract: no "none" / "nan" should ever
+        # appear in the output.
+        df = pd.DataFrame(
+            {
+                "Species": [None, "trex", "raptor"],
+                "Age_MYA": [66.0, 66.0, 70.0],
+            }
+        )
+        out = pipeline.normalise(df)
+        assert "none" not in out["species"].values
+        assert "nan" not in out["species"].values
+        assert len(out) == 2
+
 
 # ---------------------------------------------------------------------------
 # read_csv() / write_parquet() — local filesystem

@@ -54,8 +54,11 @@ def normalise(df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(f"missing required columns: {missing}")
 
     df = df.copy()
-    df["species"] = df["species"].astype(str).str.strip().str.lower()
+    # dropna BEFORE astype(str). On Python 3.11/12 with stable pandas,
+    # `None.astype(str)` returns the literal string "None", which then
+    # survives dropna and lands in the output as "none". Drop first.
     df = df.dropna(subset=list(REQUIRED_COLUMNS))
+    df["species"] = df["species"].astype(str).str.strip().str.lower()
     df = df[df["species"] != ""]
     return df.reset_index(drop=True)
 
