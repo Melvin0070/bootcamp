@@ -1,0 +1,21 @@
+# Local environment files — NEVER commit these.
+.env
+.env.*
+!.env.example
+
+# AWS / cloud credentials
+credentials
+*.pem
+*.key
+.aws/
+
+# OpenAI / 3rd-party tokens dumped to disk
+.openai-key
+.openai_api_key
+
+# Editor-specific secret stashes
+.vscode/secrets.json
+.idea/secrets.json
+
+# detect-secrets baseline metadata
+.secrets.baseline.local
