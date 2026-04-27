@@ -101,6 +101,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, test]
     if: always()
+    # No checkout in this job — override the workflow-level
+    # working-directory default so the gate step runs from $HOME
+    # instead of a path that was never created on the runner.
+    defaults:
+      run:
+        working-directory: .
     steps:
       - name: gate
         run: |
