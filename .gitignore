@@ -6,6 +6,9 @@ __pycache__/
 
 # Pytest cache
 .pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
 
 # Environment files
 .env
