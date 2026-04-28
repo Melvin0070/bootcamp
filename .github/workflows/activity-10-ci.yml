@@ -1,0 +1,117 @@
+name: activity-10-ci
+
+# Runs on every PR that touches activity-10's code OR the workflow
+# itself, plus a push-to-main run that exists so the required-status-
+# check setting in branch protection has something to require. Path
+# filters keep the matrix small — Activity 7-9 changes do not trigger
+# this run, and vice versa.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'activities/week2/activity-10-cicd/**'
+      - '.github/workflows/activity-10-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'activities/week2/activity-10-cicd/**'
+      - '.github/workflows/activity-10-ci.yml'
+  # workflow_dispatch lets a maintainer re-run CI from the Actions UI
+  # without pushing a no-op commit (e.g. after un-flaking a runner).
+  workflow_dispatch:
+
+# Cancel an in-progress run on the same ref when a new commit lands.
+# Saves CI minutes on amend-and-force-push iterations and keeps the
+# "Checks" tab honest about which run reflects HEAD.
+concurrency:
+  group: activity-10-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only by default. The CI job reads the repo and runs tests; it
+# never writes back, never assumes an AWS role, never calls the API.
+# Deploy lives in a separate workflow with its own (broader) scope.
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # Every step runs from the activity directory. Saves repeating
+    # `cd activities/week2/activity-10-cicd` in every step.
+    working-directory: activities/week2/activity-10-cicd
+
+jobs:
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: activities/week2/activity-10-cicd/requirements-dev.txt
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: ruff check
+        run: ruff check .
+      - name: ruff format check
+        run: ruff format --check .
+
+  test:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      # fail-fast off so we always see results from every cell of the
+      # matrix; one Python's flake doesn't hide the other's signal.
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: activities/week2/activity-10-cicd/requirements-dev.txt
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: pytest
+        # --cov-fail-under enforces a real coverage gate; bumping it is
+        # cheap on this small module and stops "I added a feature with
+        # no tests" PRs from sneaking through.
+        run: pytest -v --cov=. --cov-report=term-missing --cov-fail-under=85
+      - name: upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: activities/week2/activity-10-cicd/.coverage
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # A no-op aggregator that fans the matrix into a single check name.
+  # Branch protection requires this one job; no need to update the
+  # protected list when you add or drop a Python version.
+  ci-passed:
+    name: ci-passed
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    if: always()
+    # No checkout in this job — override the workflow-level
+    # working-directory default so the gate step runs from $HOME
+    # instead of a path that was never created on the runner.
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: gate
+        run: |
+          if [[ "${{ needs.lint.result }}" != "success" ]] || [[ "${{ needs.test.result }}" != "success" ]]; then
+            echo "::error::upstream job failed (lint=${{ needs.lint.result }}, test=${{ needs.test.result }})"
+            exit 1
+          fi
+          echo "ci_ok"
