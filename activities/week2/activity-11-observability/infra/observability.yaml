@@ -1,0 +1,240 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  FossilRAG ingestion pipeline — observability layer.
+  Defines CloudWatch Alarms and a dashboard backed by EMF metrics
+  emitted by pipeline.py (namespace FossilRAG/Pipeline).
+
+  Apply with:
+    aws cloudformation deploy \
+      --template-file infra/observability.yaml \
+      --stack-name fossilrag-pipeline-observability \
+      --parameter-overrides \
+          FunctionName=fossilrag-ingestion-staging \
+          AlarmNotificationTopic=arn:aws:sns:us-east-1:123:fossilrag-oncall
+
+Parameters:
+  FunctionName:
+    Type: String
+    Description: Lambda function name emitting the metrics.
+    Default: fossilrag-ingestion-staging
+
+  AlarmNotificationTopic:
+    Type: String
+    Description: SNS topic ARN to notify on alarm. Use "" to skip notifications.
+    Default: ""
+
+  FailureRateThreshold:
+    Type: Number
+    Description: Failure-rate threshold (failures per 5 min) before alarming.
+    Default: 3
+
+  P99LatencyThresholdMs:
+    Type: Number
+    Description: p99 latency threshold (ms) before alarming.
+    Default: 30000
+
+  MinRowsIngested:
+    Type: Number
+    Description: Minimum row count per invocation before alarming on empty output.
+    Default: 1
+
+Conditions:
+  HasSnsTopic: !Not [!Equals [!Ref AlarmNotificationTopic, ""]]
+
+Resources:
+
+  # ----------------------------------------------------------------------
+  # Alarms
+  # ----------------------------------------------------------------------
+
+  # Fires when the per-stage Errors metric exceeds the threshold over
+  # 5 minutes. The threshold is small on purpose — failure rate is
+  # what we want to alarm on, not absolute counts, and at staging
+  # traffic 3 failures in 5 minutes is well above noise.
+  PipelineFailureRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub fossilrag-${FunctionName}-failure-rate
+      AlarmDescription: !Sub |
+        Per-stage Errors metric exceeded ${FailureRateThreshold} in a 5-minute window.
+        Check the dashboard fossilrag-${FunctionName} to see which stage is failing,
+        then run the Logs Insights query in docs/logs-insights-queries.md.
+      Namespace: FossilRAG/Pipeline
+      MetricName: Errors
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 3
+      Threshold: !Ref FailureRateThreshold
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasSnsTopic, !Ref AlarmNotificationTopic, !Ref AWS::NoValue]
+
+  # Per-stage p99 latency. Uses Sum on Latency divided by a count
+  # would be wrong (averaging averages), so we alarm on the p99
+  # extended statistic directly.
+  PipelineLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub fossilrag-${FunctionName}-p99-latency
+      AlarmDescription: !Sub |
+        p99 latency exceeded ${P99LatencyThresholdMs}ms over a 5-minute window.
+        Drill into the dashboard's per-stage Latency panel to find the slow stage.
+      Namespace: FossilRAG/Pipeline
+      MetricName: Latency
+      ExtendedStatistic: p99
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref P99LatencyThresholdMs
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasSnsTopic, !Ref AlarmNotificationTopic, !Ref AWS::NoValue]
+
+  # Detects the silent-failure mode: pipeline ran, no exception, but
+  # produced zero rows. Without this metric the broken baseline would
+  # report "all green" while the downstream BI dashboard was stale.
+  PipelineEmptyOutputAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub fossilrag-${FunctionName}-empty-output
+      AlarmDescription: |
+        Pipeline reported success but RowsIngested < threshold.
+        Likely cause: schema drift in upstream CSV; check normalise() vs latest header.
+      Namespace: FossilRAG/Pipeline
+      MetricName: RowsIngested
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref MinRowsIngested
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching  # missing data here means the pipeline didn't run at all
+      AlarmActions:
+        - !If [HasSnsTopic, !Ref AlarmNotificationTopic, !Ref AWS::NoValue]
+
+  # Composite alarm so PagerDuty / Slack only fires once when multiple
+  # related alarms trip together (e.g. a slow stage usually causes
+  # failures too). Keeps the noise down at 2 AM.
+  PipelineHealthCompositeAlarm:
+    Type: AWS::CloudWatch::CompositeAlarm
+    # No explicit DependsOn — AlarmRule's !Ref creates the ordering
+    # implicitly, and an explicit list trips cfn-lint W3005.
+    Properties:
+      AlarmName: !Sub fossilrag-${FunctionName}-health
+      AlarmRule: !Sub
+        - 'ALARM("${F}") OR ALARM("${L}") OR ALARM("${E}")'
+        - F: !Ref PipelineFailureRateAlarm
+          L: !Ref PipelineLatencyAlarm
+          E: !Ref PipelineEmptyOutputAlarm
+      AlarmActions:
+        - !If [HasSnsTopic, !Ref AlarmNotificationTopic, !Ref AWS::NoValue]
+
+  # ----------------------------------------------------------------------
+  # Dashboard (last 24h at a glance)
+  # ----------------------------------------------------------------------
+
+  PipelineDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub fossilrag-${FunctionName}
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "text",
+              "x": 0, "y": 0, "width": 24, "height": 2,
+              "properties": {
+                "markdown": "# FossilRAG ingestion — last 24h\n**Function:** ${FunctionName}  ·  **Namespace:** FossilRAG/Pipeline  ·  **Runbook:** docs/runbook.md  ·  **Logs Insights queries:** docs/logs-insights-queries.md"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0, "y": 2, "width": 12, "height": 6,
+              "properties": {
+                "title": "Invocations vs failures (5 min)",
+                "metrics": [
+                  [ "FossilRAG/Pipeline", "Invocations", "Stage", "summary", { "stat": "Sum", "label": "Invocations" } ],
+                  [ ".", "InvocationFailures", ".", ".", { "stat": "Sum", "label": "Failures", "color": "#d62728" } ]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300,
+                "view": "timeSeries",
+                "stacked": false
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 2, "width": 12, "height": 6,
+              "properties": {
+                "title": "Per-stage errors (5 min)",
+                "metrics": [
+                  [ "FossilRAG/Pipeline", "Errors", "Stage", "read", { "stat": "Sum" } ],
+                  [ "...", "normalise", { "stat": "Sum" } ],
+                  [ "...", "write", { "stat": "Sum" } ],
+                  [ "...", "upload", { "stat": "Sum" } ]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300,
+                "view": "timeSeries",
+                "stacked": true
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0, "y": 8, "width": 12, "height": 6,
+              "properties": {
+                "title": "Per-stage latency p50 / p99 (ms)",
+                "metrics": [
+                  [ "FossilRAG/Pipeline", "Latency", "Stage", "read",      { "stat": "p50", "label": "read p50" } ],
+                  [ "...",  { "stat": "p99", "label": "read p99" } ],
+                  [ "FossilRAG/Pipeline", "Latency", "Stage", "normalise", { "stat": "p50", "label": "normalise p50" } ],
+                  [ "...",  { "stat": "p99", "label": "normalise p99" } ],
+                  [ "FossilRAG/Pipeline", "Latency", "Stage", "upload",    { "stat": "p50", "label": "upload p50" } ],
+                  [ "...",  { "stat": "p99", "label": "upload p99" } ]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300,
+                "view": "timeSeries",
+                "yAxis": { "left": { "min": 0 } }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 8, "width": 12, "height": 6,
+              "properties": {
+                "title": "Rows ingested vs dropped (5 min sum)",
+                "metrics": [
+                  [ "FossilRAG/Pipeline", "RowsIngested", "Stage", "summary", { "stat": "Sum" } ],
+                  [ ".", "RowsDropped",   ".", ".",                            { "stat": "Sum", "color": "#ff9800" } ]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300,
+                "view": "timeSeries",
+                "stacked": false
+              }
+            },
+            {
+              "type": "alarm",
+              "x": 0, "y": 14, "width": 24, "height": 4,
+              "properties": {
+                "title": "Active alarms",
+                "alarms": [
+                  "${PipelineFailureRateAlarm.Arn}",
+                  "${PipelineLatencyAlarm.Arn}",
+                  "${PipelineEmptyOutputAlarm.Arn}",
+                  "${PipelineHealthCompositeAlarm.Arn}"
+                ]
+              }
+            }
+          ]
+        }
+
+Outputs:
+  DashboardUrl:
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=fossilrag-${FunctionName}
+    Description: Console URL for the pipeline health dashboard.
+
+  CompositeAlarmName:
+    Value: !Ref PipelineHealthCompositeAlarm
+    Description: Single alarm to wire into PagerDuty / Slack.
