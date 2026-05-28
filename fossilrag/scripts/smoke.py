@@ -44,7 +44,10 @@ def main() -> None:
         )
         r.raise_for_status()
         ingested = r.json()
-        assert ingested["chunks_indexed"] >= 3, ingested
+        # >= 1 (not == N): the token-aware chunker may pack short paragraphs
+        # into one chunk at the default budget. The retrieval assertion below
+        # is the meaningful spine check.
+        assert ingested["chunks_indexed"] >= 1, ingested
         print(
             f"smoke: ingested doc_id={ingested['doc_id'][:12]} chunks={ingested['chunks_indexed']}"
         )
