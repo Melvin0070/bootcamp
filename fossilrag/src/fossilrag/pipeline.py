@@ -25,6 +25,7 @@ async def ingest_document(
     data: bytes,
     content_type: str = "text/plain",
     user_id: str | None = None,
+    source_id: str | None = None,
     layer_version: int = 1,
 ) -> IngestResult:
     """Run raw bytes through the full spine and index the resulting fossils.
@@ -38,6 +39,7 @@ async def ingest_document(
         data=data,
         content_type=content_type,
         user_id=user_id,
+        source_id=source_id,
     )
     chunks = chunk_document(doc, layer_version=layer_version)
     if not chunks:

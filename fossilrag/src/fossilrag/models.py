@@ -80,6 +80,11 @@ class RawDocument(BaseModel):
     """Silver-layer record: extracted text + provenance."""
 
     doc_id: str
+    # Stable logical-document identity ACROSS content versions (defaults to the
+    # filename). doc_id is the content hash and changes when the bytes change;
+    # source_id stays put, so versions of "report.txt" share a source_id and are
+    # addressable as fossil layers (Time-Travel / Fossil Diff).
+    source_id: str
     filename: str
     content_type: str = "text/plain"
     text: str
@@ -98,10 +103,12 @@ class RawDocument(BaseModel):
         content_type: str = "text/plain",
         user_id: str | None = None,
         source_uri: str | None = None,
+        source_id: str | None = None,
         metadata: dict[str, str] | None = None,
     ) -> RawDocument:
         return cls(
             doc_id=compute_doc_id(filename, text),
+            source_id=source_id or filename,
             filename=filename,
             content_type=content_type,
             text=text,
@@ -117,6 +124,7 @@ class Chunk(BaseModel):
 
     chunk_id: str
     doc_id: str
+    source_id: str = ""
     ordinal: int
     content: str
     char_count: int
@@ -175,3 +183,38 @@ class MutateResponse(BaseModel):
     used_chunks: list[ExcavateHit]
     note: str = ""
     latency_ms: float
+
+
+class FossilLayerChunk(BaseModel):
+    """One chunk of a specific fossil layer (served without its embedding)."""
+
+    chunk_id: str
+    doc_id: str
+    source_id: str
+    ordinal: int
+    content: str
+    layer_version: int
+    geological_age: str
+
+
+class TimeTravelResponse(BaseModel):
+    """A document's fossils at a chosen layer + how it relates to the latest."""
+
+    source_id: str
+    version: int
+    latest_version: int
+    available_versions: list[int]
+    is_latest: bool
+    chunks: list[FossilLayerChunk]
+
+
+class FossilDiffResponse(BaseModel):
+    """Changes between two fossil layers of the same document."""
+
+    source_id: str
+    from_version: int
+    to_version: int
+    changed: bool
+    added_lines: int
+    removed_lines: int
+    unified_diff: str

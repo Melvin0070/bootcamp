@@ -12,7 +12,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
-from fossilrag.models import Chunk, ExcavateHit
+from fossilrag.models import Chunk, ExcavateHit, FossilLayerChunk
 
 
 @runtime_checkable
@@ -32,6 +32,18 @@ class VectorStore(Protocol):
 
     async def search(self, query_vector: np.ndarray, k: int) -> list[ExcavateHit]:
         """Return the ``k`` nearest chunks to ``query_vector`` by cosine similarity."""
+        ...
+
+    async def list_layers(self, source_id: str) -> list[int]:
+        """Ascending fossil-layer versions for a logical document (Time-Travel)."""
+        ...
+
+    async def latest_layer(self, source_id: str) -> int | None:
+        """Highest layer version for a document, or None if unknown."""
+        ...
+
+    async def get_layer(self, source_id: str, layer_version: int) -> list[FossilLayerChunk]:
+        """All chunks of one fossil layer, in document order (no embedding)."""
         ...
 
     async def healthcheck(self) -> bool:

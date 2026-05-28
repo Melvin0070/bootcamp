@@ -25,9 +25,16 @@ from fossilrag.llm import fossil_key, make_llm, make_prompt_cache
 from fossilrag.llm.base import LLMProvider
 from fossilrag.llm.cache import PromptCache
 from fossilrag.logging import configure_logging, get_logger
-from fossilrag.models import ExcavateResponse, IngestResult, MutateResponse
+from fossilrag.models import (
+    ExcavateResponse,
+    FossilDiffResponse,
+    IngestResult,
+    MutateResponse,
+    TimeTravelResponse,
+)
 from fossilrag.mutate import MOCK_NOTE
 from fossilrag.pipeline import ingest_document
+from fossilrag.timetravel import unified_fossil_diff
 from fossilrag.vectorstore import make_vector_store
 from fossilrag.vectorstore.base import VectorStore
 
@@ -113,6 +120,8 @@ class IngestRequest(BaseModel):
     text: str = Field(min_length=1)
     content_type: str = "text/plain"
     user_id: str | None = None
+    # Stable logical-doc id tying versions together (defaults to filename).
+    source_id: str | None = Field(default=None, max_length=512)
     layer_version: int = Field(default=1, ge=1)
 
 
@@ -133,7 +142,7 @@ async def root(settings: Settings = Depends(settings_dep)) -> dict:
         "embed_model": settings.embed_model,
         "embed_dim": settings.embed_dim,
         "vector_backend": "pgvector",
-        "endpoints": ["/excavate", "/ingest", "/mutate", "/healthz"],
+        "endpoints": ["/excavate", "/ingest", "/mutate", "/timetravel", "/diff", "/healthz"],
     }
 
 
@@ -165,6 +174,7 @@ async def ingest(
             data=req.text.encode("utf-8"),
             content_type=req.content_type,
             user_id=req.user_id,
+            source_id=req.source_id,
             layer_version=req.layer_version,
         )
     except ValueError as exc:
@@ -256,4 +266,63 @@ async def mutate(
         used_chunks=hits,
         note=MOCK_NOTE if is_mock else "",
         latency_ms=latency_ms,
+    )
+
+
+@app.get("/timetravel", response_model=TimeTravelResponse)
+async def timetravel(
+    source_id: str = Query(..., min_length=1, description="Stable logical-document id."),
+    version: int | None = Query(None, ge=1, description="Fossil layer; default = latest."),
+    store: VectorStore = Depends(get_store),
+) -> TimeTravelResponse:
+    """Return a document's fossils at a chosen layer (Time-Travel Query)."""
+    versions = await store.list_layers(source_id)
+    if not versions:
+        raise HTTPException(status_code=404, detail=f"no fossil layers for source_id {source_id!r}")
+    latest = versions[-1]
+    v = version if version is not None else latest
+    if v not in versions:
+        raise HTTPException(status_code=404, detail=f"layer v{v} not found; available: {versions}")
+    chunks = await store.get_layer(source_id, v)
+    log.info("event=timetravel source_id=%s version=%d latest=%d", source_id, v, latest)
+    return TimeTravelResponse(
+        source_id=source_id,
+        version=v,
+        latest_version=latest,
+        available_versions=versions,
+        is_latest=(v == latest),
+        chunks=chunks,
+    )
+
+
+@app.get("/diff", response_model=FossilDiffResponse)
+async def diff(
+    source_id: str = Query(..., min_length=1),
+    from_version: int = Query(..., ge=1),
+    to_version: int = Query(..., ge=1),
+    store: VectorStore = Depends(get_store),
+) -> FossilDiffResponse:
+    """Show changes between two fossil layers of a document (Fossil Diff)."""
+    from_chunks = await store.get_layer(source_id, from_version)
+    to_chunks = await store.get_layer(source_id, to_version)
+    if not from_chunks:
+        raise HTTPException(status_code=404, detail=f"layer v{from_version} not found")
+    if not to_chunks:
+        raise HTTPException(status_code=404, detail=f"layer v{to_version} not found")
+    result = unified_fossil_diff(from_version, to_version, from_chunks, to_chunks)
+    log.info(
+        "event=fossil_diff source_id=%s from=%d to=%d changed=%s",
+        source_id,
+        from_version,
+        to_version,
+        result.changed,
+    )
+    return FossilDiffResponse(
+        source_id=source_id,
+        from_version=from_version,
+        to_version=to_version,
+        changed=result.changed,
+        added_lines=result.added_lines,
+        removed_lines=result.removed_lines,
+        unified_diff=result.unified_diff,
     )

@@ -108,6 +108,13 @@ def test_extract_handles_content_type_params():
     assert doc.content_type == "text/plain"
 
 
+def test_raw_document_source_id_defaults_to_filename_and_overrides():
+    d = RawDocument.from_text(filename="report.txt", text="x")
+    assert d.source_id == "report.txt"  # stable logical id defaults to filename
+    d2 = RawDocument.from_text(filename="report.txt", text="x", source_id="doc-key")
+    assert d2.source_id == "doc-key"
+
+
 def test_extract_normalises_crlf():
     # CRLF/CR are normalised to LF at the decode boundary (chunking tests in
     # test_chunking.py cover the semantic split).

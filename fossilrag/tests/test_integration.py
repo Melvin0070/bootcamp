@@ -213,3 +213,56 @@ def test_excavate_endpoint_e2e():
             else:
                 os.environ[k] = v
         get_settings.cache_clear()
+
+
+def test_timetravel_and_diff_e2e():
+    """Ingest two versions under one source_id; time-travel + diff over HTTP."""
+    from fastapi.testclient import TestClient
+
+    from fossilrag.api.app import app
+
+    sid = "report-timetravel"
+    with TestClient(app) as client:
+        client.post(
+            "/ingest",
+            json={
+                "filename": "r.txt",
+                "text": "Alpha fact. Beta fact.",
+                "source_id": sid,
+                "layer_version": 1,
+            },
+        ).raise_for_status()
+        client.post(
+            "/ingest",
+            json={
+                "filename": "r.txt",
+                "text": "Alpha fact. Gamma fact. Delta fact.",
+                "source_id": sid,
+                "layer_version": 2,
+            },
+        ).raise_for_status()
+
+        # Time-Travel: explicit older layer + default (latest).
+        tt = client.get("/timetravel", params={"source_id": sid, "version": 1}).json()
+        assert tt["available_versions"] == [1, 2]
+        assert tt["version"] == 1 and tt["latest_version"] == 2 and tt["is_latest"] is False
+        assert tt["chunks"] and all(c["layer_version"] == 1 for c in tt["chunks"])
+        latest = client.get("/timetravel", params={"source_id": sid}).json()
+        assert latest["version"] == 2 and latest["is_latest"] is True
+
+        # Fossil Diff between the two layers.
+        df = client.get(
+            "/diff", params={"source_id": sid, "from_version": 1, "to_version": 2}
+        ).json()
+        assert df["changed"] is True
+        assert df["from_version"] == 1 and df["to_version"] == 2
+        assert df["unified_diff"]
+
+        # 404s for unknown source / version.
+        assert client.get("/timetravel", params={"source_id": "nope"}).status_code == 404
+        assert (
+            client.get(
+                "/diff", params={"source_id": sid, "from_version": 1, "to_version": 9}
+            ).status_code
+            == 404
+        )

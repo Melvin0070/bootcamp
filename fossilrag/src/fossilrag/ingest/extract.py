@@ -125,6 +125,7 @@ def extract_document(
     content_type: str = "text/plain",
     user_id: str | None = None,
     source_uri: str | None = None,
+    source_id: str | None = None,
 ) -> RawDocument:
     """Extract text + metadata from raw bytes into a :class:`RawDocument`.
 
@@ -150,6 +151,7 @@ def extract_document(
         content_type=ctype,
         user_id=user_id,
         source_uri=source_uri,
+        source_id=source_id,
         metadata={"extractor": tag, "bytes": str(len(data))},
     )
     if doc.char_count == 0:

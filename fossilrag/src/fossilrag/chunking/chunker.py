@@ -94,6 +94,7 @@ def chunk_document(
         Chunk(
             chunk_id=compute_chunk_id(doc.doc_id, ordinal, content),
             doc_id=doc.doc_id,
+            source_id=doc.source_id,
             ordinal=ordinal,
             content=content,
             char_count=len(content),
