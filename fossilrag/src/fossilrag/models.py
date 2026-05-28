@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -240,9 +241,14 @@ class EnrichmentRecord(BaseModel):
 
 
 class ChatMessage(BaseModel):
-    """One turn of a Chat-Based Fossil Excavation conversation."""
+    """One turn of a Chat-Based Fossil Excavation conversation.
 
-    role: str  # user | assistant
+    ``role`` is constrained to user/assistant so an invalid role is rejected at
+    the API validation layer (422) rather than forwarded to the LLM provider
+    (which would surface as an opaque 502).
+    """
+
+    role: Literal["user", "assistant"]
     content: str = Field(min_length=1)
 
 

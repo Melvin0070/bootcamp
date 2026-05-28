@@ -47,6 +47,14 @@ def test_mock_llm_summarises_from_hits():
     assert "plates" in r.text
 
 
+def test_chat_message_rejects_invalid_role():
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    with _pytest.raises(ValidationError):
+        ChatMessage(role="system", content="x")  # only user|assistant allowed → 422 at the API
+
+
 def test_build_chat_grounds_context_and_maps_turns():
     msgs = [
         ChatMessage(role="user", content="What plates?"),
