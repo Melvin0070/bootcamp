@@ -1,9 +1,8 @@
 """AWS Lambda handler: S3 ObjectCreated → extract → silver.
 
 Wired to the raw bucket's ``s3:ObjectCreated:*`` notification (Terraform in
-PR11). For each event record it reads the raw object, extracts text +
-provenance, and writes the silver-layer JSON. Extraction is content-addressed,
-so redelivered events are idempotent.
+PR11). The per-object work is factored into :func:`ingest_s3_object` so the SQS
+worker (PR10) reuses exactly the same extraction path.
 
 Per-record *extraction* failures are collected and, if any occurred, re-raised
 at the end so the platform retries the invocation and (PR10) routes exhausted
@@ -22,6 +21,25 @@ from fossilrag.ingest.storage import make_s3_client, read_object, write_silver
 from fossilrag.logging import configure_logging, get_logger
 
 log = get_logger("ingest.handler")
+
+
+def ingest_s3_object(
+    s3: Any, src_bucket: str, key: str, *, silver_bucket: str, prefix: str = "silver"
+) -> dict[str, str]:
+    """Read one raw S3 object, extract it, write the silver record. Returns refs.
+
+    Uses the FULL key (not just the basename) as the doc_id filename input, so
+    same-basename objects under different prefixes stay distinct fossils.
+    """
+    data, content_type = read_object(src_bucket, key, client=s3)
+    doc = extract_document(
+        filename=key,
+        data=data,
+        content_type=content_type,
+        source_uri=f"s3://{src_bucket}/{key}",
+    )
+    uri = write_silver(doc, silver_bucket, client=s3, prefix=prefix)
+    return {"key": key, "doc_id": doc.doc_id, "silver_uri": uri}
 
 
 def _records(event: dict[str, Any]) -> list[dict[str, Any]]:
@@ -45,33 +63,23 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
         s3_info = record.get("s3", {})
         src_bucket = s3_info.get("bucket", {}).get("name")
         # S3 event keys are URL-encoded (spaces → '+', etc.).
-        raw_key = s3_info.get("object", {}).get("key", "")
-        key = urllib.parse.unquote_plus(raw_key)
+        key = urllib.parse.unquote_plus(s3_info.get("object", {}).get("key", ""))
         if not src_bucket or not key:
             log.warning("event=skip_malformed_record record=%r", record)
             continue
         try:
-            data, content_type = read_object(src_bucket, key, client=s3)
-            doc = extract_document(
-                # Use the FULL key (not just the basename) so doc_id is
-                # path-aware: two objects with the same basename + identical
-                # content under different prefixes stay distinct fossils with
-                # correct provenance (their own source_uri), instead of
-                # colliding onto one silver object.
-                filename=key,
-                data=data,
-                content_type=content_type,
-                source_uri=f"s3://{src_bucket}/{key}",
+            processed.append(
+                ingest_s3_object(
+                    s3, src_bucket, key, silver_bucket=silver_bucket, prefix=settings.silver_prefix
+                )
             )
-            uri = write_silver(doc, silver_bucket, client=s3, prefix=settings.silver_prefix)
-            processed.append({"key": key, "doc_id": doc.doc_id, "silver_uri": uri})
         except Exception as exc:  # noqa: BLE001 — record + continue, re-raise below
             log.exception("event=ingest_record_failed bucket=%s key=%s", src_bucket, key)
             failures.append({"key": key, "error": f"{type(exc).__name__}: {exc}"})
 
     log.info("event=ingest_batch_done processed=%d failed=%d", len(processed), len(failures))
     if failures:
-        # Surface failure so the platform retries / DLQs (PR10), instead of a
-        # silent partial success.
+        # Surface failure so the platform retries / DLQs, instead of a silent
+        # partial success.
         raise RuntimeError(f"{len(failures)} record(s) failed: {failures}")
     return {"processed": processed, "failed": failures}

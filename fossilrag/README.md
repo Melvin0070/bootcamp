@@ -115,7 +115,7 @@ FossilRAG implements **all three** brief use cases as one composed system, and
 | 7  | ✅ | **Chat Excavation** (`/chat`): multi-turn, source-scoped retrieval, geological-age citations |
 | 8  | ✅ | **PPTX Slide Mutator** (`/slide/mutate`): edit suggestion + diff + version tracking (new fossil layer) |
 | 9  | ✅ | **Fine-Tuning Dataset Builder** (`/dataset`): JSONL instruction/response pairs from gold fossils |
-| 10 | ⬜ | Auto-Scaling Lambda + DLQ |
+| 10 | ✅ | **Auto-Scaling Lambda + DLQ**: SQS worker (partial-batch-failure, retry/backoff, idempotent) + DLQ handler |
 | 11 | ⬜ | Terraform IaC (live-deploy-ready) |
 | 12 | ⬜ | Full compose stack (LocalStack + workers + UI) |
 | 13 | ⬜ | React Fossil UI |
