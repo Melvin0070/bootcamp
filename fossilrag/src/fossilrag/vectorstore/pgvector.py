@@ -34,7 +34,7 @@ from pgvector.asyncpg import register_vector
 
 from fossilrag.config import Settings
 from fossilrag.logging import get_logger
-from fossilrag.models import Chunk, ExcavateHit, FossilLayerChunk
+from fossilrag.models import Chunk, EnrichmentRecord, ExcavateHit, FossilLayerChunk, Marker
 
 log = get_logger("vectorstore.pgvector")
 
@@ -156,6 +156,20 @@ class PgVectorStore:
             f"ON {self._table} USING hnsw (embedding vector_cosine_ops) "
             f"WITH (m = 16, ef_construction = 64);"
         )
+        # Structured enrichment (Automated Enrichment): one markers record per
+        # (source_id, layer_version) fossil layer. Model-independent (text
+        # extraction, not embeddings), so no provenance columns.
+        markers_ddl = f"""
+            CREATE TABLE IF NOT EXISTS {self._table}_markers (
+                source_id      text NOT NULL,
+                layer_version  integer NOT NULL,
+                doc_id         text NOT NULL,
+                markers        jsonb NOT NULL,
+                counts         jsonb NOT NULL,
+                created_at     timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (source_id, layer_version)
+            );
+        """
         async with self._pool.acquire() as conn:
             await conn.execute(ddl)
             await conn.execute(alter_source)
@@ -164,6 +178,7 @@ class PgVectorStore:
             await conn.execute(prov_idx)
             await conn.execute(source_idx)
             await conn.execute(hnsw)
+            await conn.execute(markers_ddl)
         log.info("event=pgvector_bootstrapped table=%s dim=%d", self._table, self._dim)
 
     async def close(self) -> None:
@@ -334,6 +349,67 @@ class PgVectorStore:
             )
             for r in rows
         ]
+
+    # -- structured enrichment (Automated Enrichment) ---------------------
+
+    async def store_markers(
+        self, *, doc_id: str, source_id: str, layer_version: int, markers: list[Marker]
+    ) -> EnrichmentRecord:
+        """Upsert a layer's extracted markers as a structured enrichment record."""
+        counts: dict[str, int] = {}
+        for m in markers:
+            counts[m.kind] = counts.get(m.kind, 0) + 1
+        payload = json.dumps([m.model_dump() for m in markers])
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO {self._table}_markers
+                    (source_id, layer_version, doc_id, markers, counts)
+                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
+                ON CONFLICT (source_id, layer_version) DO UPDATE SET
+                    doc_id = EXCLUDED.doc_id,
+                    markers = EXCLUDED.markers,
+                    counts = EXCLUDED.counts,
+                    created_at = now();
+                """,
+                source_id,
+                layer_version,
+                doc_id,
+                payload,
+                json.dumps(counts),
+            )
+        log.info(
+            "event=markers_stored source_id=%s layer=%d count=%d",
+            source_id,
+            layer_version,
+            len(markers),
+        )
+        return EnrichmentRecord(
+            source_id=source_id,
+            doc_id=doc_id,
+            layer_version=layer_version,
+            markers=markers,
+            counts=counts,
+        )
+
+    async def get_markers(self, source_id: str, layer_version: int) -> EnrichmentRecord | None:
+        """Fetch a layer's stored enrichment record, or None if absent."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"SELECT doc_id, markers, counts FROM {self._table}_markers "
+                f"WHERE source_id = $1 AND layer_version = $2",
+                source_id,
+                layer_version,
+            )
+        if row is None:
+            return None
+        return EnrichmentRecord(
+            source_id=source_id,
+            doc_id=row["doc_id"],
+            layer_version=layer_version,
+            markers=[Marker(**m) for m in json.loads(row["markers"])],
+            counts=json.loads(row["counts"]),
+        )
 
     async def healthcheck(self) -> bool:
         async with self._pool.acquire() as conn:

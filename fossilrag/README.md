@@ -48,6 +48,8 @@ make e2e                      # up -> ingest -> excavate -> assert -> down
 | `POST` | `/mutate`   | Retrieve relevant fossils → grounded LLM summary/edit (pluggable mock/Bedrock/Anthropic) with Prompt Fossilization |
 | `GET`  | `/timetravel` | A document's fossils at a chosen layer version + how it relates to the latest |
 | `GET`  | `/diff`     | Changes between two fossil-layer versions of a document |
+| `POST` | `/enrich`   | Extract structured markers (dates/metrics/error codes) → versioned enrichment record |
+| `GET`  | `/markers`  | Retrieve a document layer's stored enrichment record |
 | `GET`  | `/healthz`  | Pool + store readiness |
 | `GET`  | `/`         | Service info |
 
@@ -106,7 +108,7 @@ FossilRAG implements **all three** brief use cases as one composed system, and
 | 3  | ✅ | Embedding: pluggable local (sentence-transformers) + Bedrock Titan v2 + **Self-Healing Idempotency** (DynamoDB ledger) |
 | 4  | ✅ | `/mutate`: pluggable LLM (mock/Bedrock Converse/Anthropic) + **Prompt Fossilization** (output cache) |
 | 5  | ✅ | **Time-Travel Query** (`/timetravel`) + **Fossil Diff** (`/diff`) over versioned fossil layers |
-| 6  | ⬜ | Automated Enrichment (markers: dates/metrics/error codes) |
+| 6  | ✅ | **Automated Enrichment** (`/enrich`, `/markers`): extract dates/metrics/error-codes → structured DB |
 | 7  | ⬜ | Chat Excavation |
 | 8  | ⬜ | PPTX Slide Mutator |
 | 9  | ⬜ | Fine-Tuning Dataset Builder |
