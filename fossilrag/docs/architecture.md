@@ -23,7 +23,7 @@ describes the spine shipped in PR0.
 |--------|-------------|-------|--------------|
 | raw    | upload (S3 raw bucket, later) | original bytes | local bytes |
 | silver | `ingest.extract` + `ingest.handler` (S3 Lambda) | `RawDocument` (text + provenance) | txt/md/pdf/pptx; S3 raw→silver |
-| gold   | `chunking.chunker` | `Chunk[]` (fossil fragments) | paragraph split |
+| gold   | `chunking` (clean + semantic) | `Chunk[]` (fossil fragments) + JSONL/Parquet | clean + token-aware chunks w/ overlap; versioned layers |
 | vector | `embedding` + `vectorstore` | `(model_id, dim)` index | mock 384-dim → pgvector |
 | served | `api` | `ExcavateHit[]` | `/excavate` top-k |
 
