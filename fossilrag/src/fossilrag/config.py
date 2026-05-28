@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     silver_bucket: str | None = None
     silver_prefix: str = "silver"
 
+    # --- Idempotency (Self-Healing Idempotency mutation) -----------------
+    idempotency_backend: str = "null"  # null | local | dynamodb
+    idempotency_table: str | None = None
+    idempotency_manifest_path: str = "./.fossilrag/idempotency.json"
+
     # --- Service ---------------------------------------------------------
     log_level: str = "INFO"
     service_name: str = "fossilrag"
@@ -118,6 +123,13 @@ class Settings(BaseSettings):
     def _gold_format_known(cls, v: str) -> str:
         if v not in {"jsonl", "parquet"}:
             raise ValueError(f"gold_format must be 'jsonl' or 'parquet' (got {v!r})")
+        return v
+
+    @field_validator("idempotency_backend")
+    @classmethod
+    def _idem_backend_known(cls, v: str) -> str:
+        if v not in {"null", "local", "dynamodb"}:
+            raise ValueError(f"idempotency_backend must be null|local|dynamodb (got {v!r})")
         return v
 
     @field_validator("hnsw_ef_search")

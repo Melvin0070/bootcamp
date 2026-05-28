@@ -1,10 +1,10 @@
 """Pluggable embedding providers.
 
-The :class:`~fossilrag.embedding.base.Embedder` interface has one method
-(``encode``) and two provenance properties (``model_id``, ``dimensions``).
-PR0 ships the deterministic :class:`~fossilrag.embedding.mock.MockEmbedder`;
-PR3 adds the local sentence-transformers fallback and the Bedrock Titan v2
-cloud backend behind the same interface.
+One :class:`~fossilrag.embedding.base.Embedder` interface, three backends:
+the deterministic :class:`MockEmbedder` ($0 default), the local
+sentence-transformers :class:`LocalEmbedder` (dev/compose fallback), and the
+cloud :class:`BedrockEmbedder` (Titan v2). The real backends' heavy/cloud deps
+are imported lazily, so importing this package never requires torch or boto3.
 """
 
 from fossilrag.embedding.base import Embedder
@@ -16,17 +16,30 @@ __all__ = ["Embedder", "MockEmbedder", "make_embedder"]
 def make_embedder(settings=None):  # noqa: ANN001, ANN201
     """Construct the embedder named by ``settings.embed_provider``.
 
-    Only ``mock`` exists in PR0; ``local`` and ``bedrock`` are added in PR3.
-    Kept as a factory so callers (API lifespan, pipeline scripts) never import
-    a concrete backend directly.
+    mock (default) | local (sentence-transformers) | bedrock (Titan v2). When
+    ``embed_model`` is still the mock sentinel, the local/bedrock branches fall
+    back to their own sensible default model.
     """
     from fossilrag.config import get_settings
 
     settings = settings or get_settings()
     provider = settings.embed_provider.lower()
+    model = settings.embed_model
+
     if provider == "mock":
-        return MockEmbedder(model_id=settings.embed_model, dimensions=settings.embed_dim)
-    raise ValueError(
-        f"Unknown embed_provider={provider!r}. "
-        "Supported in PR0: 'mock' (local/bedrock arrive in PR3)."
-    )
+        return MockEmbedder(model_id=model, dimensions=settings.embed_dim)
+    if provider == "local":
+        from fossilrag.embedding.local import DEFAULT_MODEL, LocalEmbedder
+
+        name = model if model and not model.startswith("mock") else DEFAULT_MODEL
+        return LocalEmbedder(model_name=name)
+    if provider == "bedrock":
+        from fossilrag.embedding.bedrock import DEFAULT_MODEL, BedrockEmbedder
+
+        model_id = (
+            model if model.startswith("amazon.") or model.startswith("cohere.") else DEFAULT_MODEL
+        )
+        return BedrockEmbedder(
+            model_id=model_id, dimensions=settings.embed_dim, region=settings.aws_region
+        )
+    raise ValueError(f"Unknown embed_provider={provider!r} (mock|local|bedrock).")
