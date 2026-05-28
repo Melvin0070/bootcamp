@@ -51,16 +51,31 @@ Resources:
   # 5 minutes. The threshold is small on purpose — failure rate is
   # what we want to alarm on, not absolute counts, and at staging
   # traffic 3 failures in 5 minutes is well above noise.
-  PipelineFailureRateAlarm:
+  #
+  # IMPORTANT: every EMF metric is emitted WITH a `Stage` dimension, and
+  # CloudWatch does NOT synthesize a dimensionless rollup from dimensioned
+  # series. A dimensionless alarm on `Errors` would watch a series that is
+  # never published and could never fire. So each alarm below pins the
+  # exact `Stage` dimension value it watches, and the composite alarm
+  # fans the per-stage alarms into one notification.
+  #
+  # We use per-stage alarms (not a single metric-math SUM across stages)
+  # on purpose: a single basic alarm on `Errors{Stage=read}` matches the
+  # emitted series exactly, and sidesteps the metric-math missing-data
+  # question for the partial-failure case (when `normalise` throws, only
+  # `read`/`normalise` emit that invocation — `write`/`upload` are absent).
+  PipelineErrorsReadAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub fossilrag-${FunctionName}-failure-rate
+      AlarmName: !Sub fossilrag-${FunctionName}-errors-read
       AlarmDescription: !Sub |
-        Per-stage Errors metric exceeded ${FailureRateThreshold} in a 5-minute window.
-        Check the dashboard fossilrag-${FunctionName} to see which stage is failing,
-        then run the Logs Insights query in docs/logs-insights-queries.md.
+        Errors in the READ stage exceeded ${FailureRateThreshold} in a 5-minute window.
+        Run the Logs Insights query in docs/logs-insights-queries.md (filter Stage="read").
       Namespace: FossilRAG/Pipeline
       MetricName: Errors
+      Dimensions:
+        - Name: Stage
+          Value: read
       Statistic: Sum
       Period: 60
       EvaluationPeriods: 5
@@ -71,18 +86,145 @@ Resources:
       AlarmActions:
         - !If [HasSnsTopic, !Ref AlarmNotificationTopic, !Ref AWS::NoValue]
 
-  # Per-stage p99 latency. Uses Sum on Latency divided by a count
-  # would be wrong (averaging averages), so we alarm on the p99
-  # extended statistic directly.
-  PipelineLatencyAlarm:
+  PipelineErrorsNormaliseAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub fossilrag-${FunctionName}-p99-latency
+      AlarmName: !Sub fossilrag-${FunctionName}-errors-normalise
       AlarmDescription: !Sub |
-        p99 latency exceeded ${P99LatencyThresholdMs}ms over a 5-minute window.
-        Drill into the dashboard's per-stage Latency panel to find the slow stage.
+        Errors in the NORMALISE stage exceeded ${FailureRateThreshold} in a 5-minute window.
+        Most common cause: upstream CSV schema drift (renamed/missing columns).
+      Namespace: FossilRAG/Pipeline
+      MetricName: Errors
+      Dimensions:
+        - Name: Stage
+          Value: normalise
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 3
+      Threshold: !Ref FailureRateThreshold
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasSnsTopic, !Ref AlarmNotificationTopic, !Ref AWS::NoValue]
+
+  PipelineErrorsWriteAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub fossilrag-${FunctionName}-errors-write
+      AlarmDescription: !Sub |
+        Errors in the WRITE stage exceeded ${FailureRateThreshold} in a 5-minute window.
+      Namespace: FossilRAG/Pipeline
+      MetricName: Errors
+      Dimensions:
+        - Name: Stage
+          Value: write
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 3
+      Threshold: !Ref FailureRateThreshold
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasSnsTopic, !Ref AlarmNotificationTopic, !Ref AWS::NoValue]
+
+  PipelineErrorsUploadAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub fossilrag-${FunctionName}-errors-upload
+      AlarmDescription: !Sub |
+        Errors in the UPLOAD stage exceeded ${FailureRateThreshold} in a 5-minute window.
+        Usually S3 (throttling / NoSuchBucket / credentials).
+      Namespace: FossilRAG/Pipeline
+      MetricName: Errors
+      Dimensions:
+        - Name: Stage
+          Value: upload
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 3
+      Threshold: !Ref FailureRateThreshold
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasSnsTopic, !Ref AlarmNotificationTopic, !Ref AWS::NoValue]
+
+  # Per-stage p99 latency. Alarms on the p99 extended statistic directly
+  # (averaging averages would hide tail spikes). One alarm per stage so
+  # each watches its own emitted `Latency{Stage=...}` series.
+  PipelineLatencyReadAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub fossilrag-${FunctionName}-p99-latency-read
+      AlarmDescription: !Sub |
+        READ-stage p99 latency exceeded ${P99LatencyThresholdMs}ms over a 5-minute window.
       Namespace: FossilRAG/Pipeline
       MetricName: Latency
+      Dimensions:
+        - Name: Stage
+          Value: read
+      ExtendedStatistic: p99
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref P99LatencyThresholdMs
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasSnsTopic, !Ref AlarmNotificationTopic, !Ref AWS::NoValue]
+
+  PipelineLatencyNormaliseAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub fossilrag-${FunctionName}-p99-latency-normalise
+      AlarmDescription: !Sub |
+        NORMALISE-stage p99 latency exceeded ${P99LatencyThresholdMs}ms over a 5-minute window.
+      Namespace: FossilRAG/Pipeline
+      MetricName: Latency
+      Dimensions:
+        - Name: Stage
+          Value: normalise
+      ExtendedStatistic: p99
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref P99LatencyThresholdMs
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasSnsTopic, !Ref AlarmNotificationTopic, !Ref AWS::NoValue]
+
+  PipelineLatencyWriteAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub fossilrag-${FunctionName}-p99-latency-write
+      AlarmDescription: !Sub |
+        WRITE-stage p99 latency exceeded ${P99LatencyThresholdMs}ms over a 5-minute window.
+      Namespace: FossilRAG/Pipeline
+      MetricName: Latency
+      Dimensions:
+        - Name: Stage
+          Value: write
+      ExtendedStatistic: p99
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref P99LatencyThresholdMs
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasSnsTopic, !Ref AlarmNotificationTopic, !Ref AWS::NoValue]
+
+  PipelineLatencyUploadAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub fossilrag-${FunctionName}-p99-latency-upload
+      AlarmDescription: !Sub |
+        UPLOAD-stage p99 latency exceeded ${P99LatencyThresholdMs}ms over a 5-minute window.
+      Namespace: FossilRAG/Pipeline
+      MetricName: Latency
+      Dimensions:
+        - Name: Stage
+          Value: upload
       ExtendedStatistic: p99
       Period: 300
       EvaluationPeriods: 1
@@ -93,8 +235,10 @@ Resources:
         - !If [HasSnsTopic, !Ref AlarmNotificationTopic, !Ref AWS::NoValue]
 
   # Detects the silent-failure mode: pipeline ran, no exception, but
-  # produced zero rows. Without this metric the broken baseline would
-  # report "all green" while the downstream BI dashboard was stale.
+  # produced zero rows. The summary metrics are emitted with
+  # `Stage=summary`, so this alarm pins that dimension — without it the
+  # alarm would watch a non-existent dimensionless series and, with
+  # TreatMissingData=breaching, sit in permanent ALARM.
   PipelineEmptyOutputAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -104,6 +248,9 @@ Resources:
         Likely cause: schema drift in upstream CSV; check normalise() vs latest header.
       Namespace: FossilRAG/Pipeline
       MetricName: RowsIngested
+      Dimensions:
+        - Name: Stage
+          Value: summary
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
@@ -115,7 +262,8 @@ Resources:
 
   # Composite alarm so PagerDuty / Slack only fires once when multiple
   # related alarms trip together (e.g. a slow stage usually causes
-  # failures too). Keeps the noise down at 2 AM.
+  # failures too). Keeps the noise down at 2 AM. Fans in every per-stage
+  # error + latency alarm plus the empty-output alarm.
   PipelineHealthCompositeAlarm:
     Type: AWS::CloudWatch::CompositeAlarm
     # No explicit DependsOn — AlarmRule's !Ref creates the ordering
@@ -123,10 +271,19 @@ Resources:
     Properties:
       AlarmName: !Sub fossilrag-${FunctionName}-health
       AlarmRule: !Sub
-        - 'ALARM("${F}") OR ALARM("${L}") OR ALARM("${E}")'
-        - F: !Ref PipelineFailureRateAlarm
-          L: !Ref PipelineLatencyAlarm
-          E: !Ref PipelineEmptyOutputAlarm
+        - >-
+          ALARM("${ER}") OR ALARM("${EN}") OR ALARM("${EW}") OR ALARM("${EU}")
+          OR ALARM("${LR}") OR ALARM("${LN}") OR ALARM("${LW}") OR ALARM("${LU}")
+          OR ALARM("${EO}")
+        - ER: !Ref PipelineErrorsReadAlarm
+          EN: !Ref PipelineErrorsNormaliseAlarm
+          EW: !Ref PipelineErrorsWriteAlarm
+          EU: !Ref PipelineErrorsUploadAlarm
+          LR: !Ref PipelineLatencyReadAlarm
+          LN: !Ref PipelineLatencyNormaliseAlarm
+          LW: !Ref PipelineLatencyWriteAlarm
+          LU: !Ref PipelineLatencyUploadAlarm
+          EO: !Ref PipelineEmptyOutputAlarm
       AlarmActions:
         - !If [HasSnsTopic, !Ref AlarmNotificationTopic, !Ref AWS::NoValue]
 
@@ -190,6 +347,8 @@ Resources:
                   [ "...",  { "stat": "p99", "label": "read p99" } ],
                   [ "FossilRAG/Pipeline", "Latency", "Stage", "normalise", { "stat": "p50", "label": "normalise p50" } ],
                   [ "...",  { "stat": "p99", "label": "normalise p99" } ],
+                  [ "FossilRAG/Pipeline", "Latency", "Stage", "write",     { "stat": "p50", "label": "write p50" } ],
+                  [ "...",  { "stat": "p99", "label": "write p99" } ],
                   [ "FossilRAG/Pipeline", "Latency", "Stage", "upload",    { "stat": "p50", "label": "upload p50" } ],
                   [ "...",  { "stat": "p99", "label": "upload p99" } ]
                 ],
@@ -220,10 +379,16 @@ Resources:
               "properties": {
                 "title": "Active alarms",
                 "alarms": [
-                  "${PipelineFailureRateAlarm.Arn}",
-                  "${PipelineLatencyAlarm.Arn}",
-                  "${PipelineEmptyOutputAlarm.Arn}",
-                  "${PipelineHealthCompositeAlarm.Arn}"
+                  "${PipelineHealthCompositeAlarm.Arn}",
+                  "${PipelineErrorsReadAlarm.Arn}",
+                  "${PipelineErrorsNormaliseAlarm.Arn}",
+                  "${PipelineErrorsWriteAlarm.Arn}",
+                  "${PipelineErrorsUploadAlarm.Arn}",
+                  "${PipelineLatencyReadAlarm.Arn}",
+                  "${PipelineLatencyNormaliseAlarm.Arn}",
+                  "${PipelineLatencyWriteAlarm.Arn}",
+                  "${PipelineLatencyUploadAlarm.Arn}",
+                  "${PipelineEmptyOutputAlarm.Arn}"
                 ]
               }
             }

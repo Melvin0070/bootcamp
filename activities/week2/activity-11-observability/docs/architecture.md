@@ -78,13 +78,31 @@ does not create one CloudWatch series per invocation.
 
 | Alarm | Threshold | Window | Notes |
 |---|---|---|---|
-| `failure-rate` | `Errors Sum > 3` | 3 of 5 datapoints, 1 min | Per-stage errors; sums across stages. |
-| `p99-latency` | `Latency p99 > 30000 ms` | 5 min | Extended statistic (averages would hide spikes). |
-| `empty-output` | `RowsIngested Sum < 1` | 5 min | `TreatMissingData=breaching` so a no-run page-fires too. |
+| `errors-{read,normalise,write,upload}` | `Errors Sum > 3` | 3 of 5 datapoints, 1 min | One per stage, each pinned to `Stage=<stage>`. |
+| `p99-latency-{read,normalise,write,upload}` | `Latency p99 > 30000 ms` | 5 min | One per stage; extended statistic (averages hide spikes). |
+| `empty-output` | `RowsIngested Sum < 1` | 5 min | Pinned to `Stage=summary`; `TreatMissingData=breaching` so a no-run page-fires too. |
 | `composite` | any of the above | n/a | Single fan-in for PagerDuty / Slack. |
+
+**Why one alarm per stage, not a single cross-stage alarm.** Every EMF
+metric is emitted *with* a `Stage` dimension, and CloudWatch does not
+synthesize a dimensionless rollup from dimensioned series — a
+dimensionless alarm on `Errors` would watch a series that is never
+published and could never fire (and `empty-output` with
+`TreatMissingData=breaching` would sit in permanent ALARM). Each alarm
+pins the exact `Stage` value it watches. A per-stage alarm also matches
+the emitted series exactly and sidesteps the metric-math missing-data
+question in the partial-failure case (when `normalise` throws, only
+`read`/`normalise` emit that invocation — `write`/`upload` are absent).
 
 Thresholds are CloudFormation parameters so staging and prod can use
 different values without forking the template.
+
+> **Not deploy-verified.** cfn-lint validates template *structure*, not
+> CloudWatch alarm *semantics*. The dimension fix and per-stage design
+> follow documented CloudWatch behaviour, but actual alarm firing has
+> not been validated against a live account (no deploy access in this
+> environment). The pytest suite asserts every alarm pins a `Stage`
+> dimension so the dimensionless-series bug cannot regress.
 
 ## Trade-offs
 

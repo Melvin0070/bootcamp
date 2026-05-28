@@ -23,8 +23,9 @@ operational signal**:
 - [x] **EMF custom metrics**: `Latency` and `Errors` per stage, plus
       `RowsIngested`, `RowsDropped`, `Invocations`, `InvocationFailures`
       summary metrics — all in the `FossilRAG/Pipeline` namespace
-- [x] **CloudWatch Alarms** (CloudFormation): failure-rate, p99 latency,
-      empty-output, plus a composite that gates the pager
+- [x] **CloudWatch Alarms** (CloudFormation): per-stage errors + per-stage
+      p99 latency (each pinned to its `Stage` dimension), empty-output,
+      plus a composite that gates the pager
 - [x] **CloudWatch Dashboard**: invocations vs failures, per-stage
       errors, per-stage p50/p99 latency, rows ingested vs dropped,
       active alarms — last 24h at a glance
@@ -51,7 +52,7 @@ operational signal**:
 | 1 | Only Lambda built-in metrics; no per-stage signal | EMF emitter (`metrics.py`) writes one JSON record per stage: `Latency` + `Errors` with `Stage` dimension |
 | 2 | `print()` everywhere; Logs Insights can't parse | `logger.info("event=stage_done stage=%s success=%s latency_ms=%.2f ...")` — `key=value` shape Insights parses for free |
 | 3 | `except: pass` returns 200 on every failure | `stage_timer` re-raises; the Lambda Invocation marks as errored AND a per-stage `Errors` metric ticks |
-| 4 | No alarms; downstream BI discovers outages on Monday | 3 alarms + composite in `infra/observability.yaml`: failure-rate, p99 latency, empty-output |
+| 4 | No alarms; downstream BI discovers outages on Monday | Per-stage errors + per-stage p99-latency alarms (each pinned to its `Stage` dimension) + empty-output + a composite, in `infra/observability.yaml` |
 | 5 | No dashboard; on-call pivots between Console tabs | `AWS::CloudWatch::Dashboard` with 5 widgets (invocations, errors, latency, rows, active alarms) — 24h view |
 | 6 | "Empty parquet" silent failure invisible | `RowsIngested` metric + alarm with `TreatMissingData=breaching` — also catches "Lambda never ran" |
 | 7 | No correlation key across log lines | `request_id` propagated as an EMF property (not a dimension — explained below) |
@@ -180,11 +181,12 @@ alarm + a regression test pinning it (`test_latency_alarm_uses_p99_not_average`)
 prevents a "let's simplify this" refactor from silently downgrading
 the signal.
 
-**Why one composite alarm.** Three independent alarms means three
-pages for one root cause (a slow stage usually causes failures and
-empty output too). The composite fans all three into one PagerDuty
-fire-and-forget, while the sub-alarms still exist for the dashboard
-panel and the runbook drill-down. cfn-lint flags an explicit
+**Why one composite alarm.** Nine independent alarms (errors + p99
+latency per stage, plus empty-output) means up to nine pages for one
+root cause (a slow stage usually causes failures and empty output
+too). The composite fans them all into one PagerDuty fire-and-forget,
+while the sub-alarms still exist for the dashboard panel and the
+runbook drill-down. cfn-lint flags an explicit
 `DependsOn` as redundant when an `AlarmRule` references the children;
 we let the `Ref`s in `AlarmRule` carry the ordering and ship a clean
 template.

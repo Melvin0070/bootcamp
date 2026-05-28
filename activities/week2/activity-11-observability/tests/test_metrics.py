@@ -108,6 +108,9 @@ class TestStageTimer:
         assert rec["Stage"] == "read"
         assert rec["success"] is True
         assert rec["Latency"] >= 0
+        # event is the constant "stage_done" (per-stage value is in
+        # `Stage`), so one Logs Insights filter selects every stage.
+        assert rec["event"] == "stage_done"
 
     def test_failure_emits_one_error_then_reraises(self, capsys):
         with pytest.raises(ValueError, match="boom"):

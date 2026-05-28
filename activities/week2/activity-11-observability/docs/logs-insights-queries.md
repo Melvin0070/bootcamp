@@ -10,14 +10,16 @@ All queries target the Lambda log group
 ## 1. Recent failures with row counts
 
 ```
-fields @timestamp, request_id, event, Stage, success, RowsIngested, RowsDropped
-| filter event = "stage_done" and success = "False"
+fields @timestamp, request_id, event, Stage, Errors, RowsIngested, RowsDropped
+| filter (event = "stage_done" and Errors = 1)
    or event = "pipeline_failed"
 | sort @timestamp desc
 | limit 50
 ```
 
 Pivots: failures within the last 24h, broken down by which stage.
+`success` is a JSON boolean in the EMF record; we filter on the
+numeric `Errors = 1` instead, which is unambiguous in Logs Insights.
 
 ## 2. One invocation, full timeline
 

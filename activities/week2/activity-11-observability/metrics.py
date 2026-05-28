@@ -134,7 +134,12 @@ def stage_timer(stage: str, *, request_id: str | None = None):
         raise
     finally:
         elapsed_ms = (time.perf_counter() - t0) * 1000
-        props: dict[str, Any] = {"event": f"stage_{stage}_done", "success": success}
+        # event is a constant ("stage_done") and the per-stage value
+        # lives in the `Stage` dimension/field — NOT interpolated into
+        # the event name. This keeps the EMF JSON consistent with the
+        # structured log line below, so a single Logs Insights filter
+        # (`filter event = "stage_done"`) selects every stage record.
+        props: dict[str, Any] = {"event": "stage_done", "success": success}
         if request_id:
             props["request_id"] = request_id
         emit(

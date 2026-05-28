@@ -67,28 +67,55 @@ def test_template_parses():
     assert t["AWSTemplateFormatVersion"] == "2010-09-09"
 
 
+# Per-stage alarms: one Errors alarm and one Latency alarm per stage.
+STAGES = ("Read", "Normalise", "Write", "Upload")
+STAGE_VALUES = {"Read": "read", "Normalise": "normalise", "Write": "write", "Upload": "upload"}
+ERROR_ALARMS = [f"PipelineErrors{s}Alarm" for s in STAGES]
+LATENCY_ALARMS = [f"PipelineLatency{s}Alarm" for s in STAGES]
+ALL_METRIC_ALARMS = ERROR_ALARMS + LATENCY_ALARMS + ["PipelineEmptyOutputAlarm"]
+
+
 def test_required_alarms_present():
     resources = load_template()["Resources"]
     types = {k: v["Type"] for k, v in resources.items()}
-    assert types["PipelineFailureRateAlarm"] == "AWS::CloudWatch::Alarm"
-    assert types["PipelineLatencyAlarm"] == "AWS::CloudWatch::Alarm"
-    assert types["PipelineEmptyOutputAlarm"] == "AWS::CloudWatch::Alarm"
+    for name in ALL_METRIC_ALARMS:
+        assert types[name] == "AWS::CloudWatch::Alarm", name
     assert types["PipelineHealthCompositeAlarm"] == "AWS::CloudWatch::CompositeAlarm"
     assert types["PipelineDashboard"] == "AWS::CloudWatch::Dashboard"
 
 
 def test_alarms_target_pipeline_namespace():
     resources = load_template()["Resources"]
-    for name in ("PipelineFailureRateAlarm", "PipelineLatencyAlarm", "PipelineEmptyOutputAlarm"):
+    for name in ALL_METRIC_ALARMS:
         props = resources[name]["Properties"]
         assert props["Namespace"] == "FossilRAG/Pipeline", name
 
 
-def test_latency_alarm_uses_p99_not_average():
-    """Averaging averages hides p99 spikes; the alarm must use the extended stat."""
-    props = load_template()["Resources"]["PipelineLatencyAlarm"]["Properties"]
-    assert props.get("ExtendedStatistic") == "p99"
-    assert "Statistic" not in props  # mutually exclusive in CFN
+def test_every_alarm_pins_a_stage_dimension():
+    """Regression for the dimensionless-alarm bug: every EMF metric is
+    emitted WITH a Stage dimension, so a dimensionless alarm would watch
+    a series that is never published (and, with breaching missing-data,
+    sit in permanent ALARM). Each alarm must pin exactly one Stage."""
+    resources = load_template()["Resources"]
+    expected_value = {"PipelineEmptyOutputAlarm": "summary"}
+    for s in STAGES:
+        expected_value[f"PipelineErrors{s}Alarm"] = STAGE_VALUES[s]
+        expected_value[f"PipelineLatency{s}Alarm"] = STAGE_VALUES[s]
+
+    for name in ALL_METRIC_ALARMS:
+        dims = resources[name]["Properties"].get("Dimensions")
+        assert dims, f"{name} has no Dimensions (would watch a non-existent series)"
+        assert dims == [{"Name": "Stage", "Value": expected_value[name]}], name
+
+
+def test_latency_alarms_use_p99_not_average():
+    """Averaging averages hides p99 spikes; each latency alarm must use
+    the extended stat, not Statistic=Average."""
+    resources = load_template()["Resources"]
+    for name in LATENCY_ALARMS:
+        props = resources[name]["Properties"]
+        assert props.get("ExtendedStatistic") == "p99", name
+        assert "Statistic" not in props, name  # mutually exclusive in CFN
 
 
 def test_empty_output_alarm_treats_missing_data_as_breaching():
@@ -98,19 +125,15 @@ def test_empty_output_alarm_treats_missing_data_as_breaching():
 
 
 def test_composite_alarm_references_each_child():
-    """The AlarmRule must mention each child alarm via !Sub variable
-    bindings — that's what triggers the composite. Ordering is enforced
-    implicitly by the Ref, so we don't need DependsOn (cfn-lint W3005)."""
+    """The AlarmRule must mention every per-stage alarm + empty-output via
+    !Sub variable bindings — that's what fans them into one notification.
+    Ordering is enforced implicitly by the Ref (no DependsOn → no W3005)."""
     resources = load_template()["Resources"]
     composite = resources["PipelineHealthCompositeAlarm"]
     rule_block = composite["Properties"]["AlarmRule"]
     # AlarmRule is a !Sub list: [template_string, {var_name: !Ref X, ...}]
     bindings = rule_block[1]
-    assert set(bindings.values()) == {
-        "PipelineFailureRateAlarm",
-        "PipelineLatencyAlarm",
-        "PipelineEmptyOutputAlarm",
-    }
+    assert set(bindings.values()) == set(ALL_METRIC_ALARMS)
 
 
 # ---------------------------------------------------------------------------

@@ -22,8 +22,8 @@ latency" panels tell you which stage is at fault.
 Logs Insights query:
 
 ```
-fields @timestamp, request_id, Stage, success, Latency, @message
-| filter event = "stage_done" and success = "False"
+fields @timestamp, request_id, Stage, Errors, Latency, @message
+| filter event = "stage_done" and Errors = 1
 | sort @timestamp desc
 | limit 50
 ```

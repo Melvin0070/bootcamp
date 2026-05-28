@@ -13,9 +13,9 @@ pipeline, run as a Lambda on S3 ObjectCreated). What changed:
    metrics, so a sudden drop in row count alarms even if no exception
    was raised. (That's the failure mode the broken baseline missed:
    the pipeline ran "successfully" but produced an empty parquet.)
-3. ``correlation_id`` is propagated through every log line so an
-   on-call can pivot from one record in Logs Insights to the full
-   invocation history.
+3. A ``request_id`` correlation key is propagated through every log
+   line and EMF record so an on-call can pivot from one record in
+   Logs Insights to the full invocation history.
 4. Exceptions are re-raised. The Lambda invocation marks as errored,
    the built-in ``Errors`` metric ticks, AND our per-stage ``Errors``
    metric ticks — so the dashboard tells you which stage broke
@@ -157,8 +157,15 @@ def handler(event, context):
         # Top-level failure metric — separate from per-stage Errors so
         # the dashboard can distinguish "stage 3 failed" from "the whole
         # invocation failed before any stage ran" (e.g. malformed event).
+        # Emit Invocations=1 here too: it's the denominator for any
+        # failure-rate calculation, so the "Invocations vs failures"
+        # panel would undercount total invocations if failures were
+        # missing from the Invocations series.
         emit(
-            {"InvocationFailures": (1.0, "Count")},
+            {
+                "Invocations": (1.0, "Count"),
+                "InvocationFailures": (1.0, "Count"),
+            },
             dimensions={"Stage": "summary"},
             properties={"event": "pipeline_failed", "request_id": request_id},
         )

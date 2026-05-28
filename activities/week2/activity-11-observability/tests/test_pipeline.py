@@ -108,14 +108,19 @@ class TestHandler:
         ]
         records = [json.loads(ln) for ln in out_lines]
         events = [r.get("event") for r in records]
-        assert "stage_normalise_done" in events
         assert "pipeline_failed" in events
-        # The normalise stage record must report Errors=1.
-        norm = next(r for r in records if r.get("event") == "stage_normalise_done")
+        # Stage records all share event="stage_done"; the per-stage value
+        # lives in the `Stage` field. Find the normalise stage record and
+        # assert it reports Errors=1.
+        norm = next(
+            r for r in records if r.get("event") == "stage_done" and r.get("Stage") == "normalise"
+        )
         assert norm["Errors"] == 1
-        # The summary failure record must include the InvocationFailures metric.
+        # The summary failure record must include both the failure metric
+        # and Invocations (the denominator for failure-rate).
         fail = next(r for r in records if r.get("event") == "pipeline_failed")
         assert fail["InvocationFailures"] == 1.0
+        assert fail["Invocations"] == 1.0
 
 
 # ---------------------------------------------------------------------------
