@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     silver_bucket: str | None = None
     silver_prefix: str = "silver"
 
+    # --- SQS worker (Auto-Scaling Lambda + DLQ mutation) -----------------
+    sqs_max_attempts: int = Field(default=3, ge=1)
+    sqs_base_delay: float = Field(default=0.1, ge=0.0)  # 0 disables backoff sleeps
+
     # --- Idempotency (Self-Healing Idempotency mutation) -----------------
     idempotency_backend: str = "null"  # null | local | dynamodb
     idempotency_table: str | None = None

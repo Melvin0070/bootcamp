@@ -42,8 +42,15 @@ also read unprefixed). See `.env.example`.
   event). Content-addressing makes this safe to repeat.
 - **Inspect a fossil's provenance:** read `silver/<doc_id>.json` — it carries
   `filename`, `source_uri`, `content_type`, `uploaded_at`, and the extractor.
-- **Drain a DLQ (PR10):** redrive from the DLQ to the source queue after
-  fixing the root cause.
+- **SQS ingestion worker (`worker.sqs.sqs_handler`):** drains
+  `{"bucket","key"}` tasks with retry/backoff + idempotent skip, returning
+  `batchItemFailures` so only failed messages are retried (then DLQ'd after the
+  queue's `maxReceiveCount`). Redelivered already-processed objects are no-ops.
+- **Dead letters (`worker.dlq.dlq_handler`):** logs each poison message
+  (`event=dead_letter`) for alarms/Logs Insights. To **redrive**, move messages
+  from the DLQ back to the source queue after fixing the root cause (a
+  permanently-bad object — unsupported type / deleted key — will simply DLQ
+  again, which is the signal to drop or fix it).
 
 ## Local development
 
