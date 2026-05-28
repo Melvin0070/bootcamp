@@ -166,7 +166,7 @@ def test_excavate_endpoint_e2e():
     # sentence, so the exact-text query self-matches at cosine ~1.0.
     keys = ("FOSSILRAG_CHUNK_MAX_TOKENS", "FOSSILRAG_CHUNK_OVERLAP_TOKENS")
     prev = {k: os.environ.get(k) for k in keys}
-    os.environ["FOSSILRAG_CHUNK_MAX_TOKENS"] = "8"
+    os.environ["FOSSILRAG_CHUNK_MAX_TOKENS"] = "16"  # config min; one sentence/chunk here
     os.environ["FOSSILRAG_CHUNK_OVERLAP_TOKENS"] = "0"
     get_settings.cache_clear()
     try:
