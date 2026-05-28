@@ -279,3 +279,14 @@ class SlideMutateResponse(BaseModel):
     unified_diff: str
     # When persisted, the new fossil-layer version the suggestion was saved as.
     persisted_version: int | None = None
+
+
+class DatasetResponse(BaseModel):
+    """A fine-tuning dataset built from a fossil layer (records + JSONL)."""
+
+    source_id: str
+    version: int
+    format: str
+    count: int
+    records: list[dict]
+    jsonl: str

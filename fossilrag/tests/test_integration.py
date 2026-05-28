@@ -7,6 +7,7 @@ imports asyncpg, which has no wheel on this dev box.
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import numpy as np
@@ -447,3 +448,39 @@ def test_slide_mutate_e2e():
             json={"text": "   ", "instruction": "shorten", "source_id": sid, "persist": True},
         )
         assert blank.json()["persisted_version"] is None
+
+
+def test_dataset_e2e():
+    """Fine-Tuning Dataset Builder: JSONL instruction/response pairs from a layer."""
+    from fastapi.testclient import TestClient
+
+    from fossilrag.api.app import app
+
+    sid = "ds-doc"
+    with TestClient(app) as client:
+        client.post(
+            "/ingest",
+            json={
+                "filename": "d.txt",
+                "text": "Stegosaurus had bony plates. It lived in the Jurassic.",
+                "source_id": sid,
+                "layer_version": 1,
+            },
+        ).raise_for_status()
+
+        r = client.post(
+            "/dataset", json={"source_id": sid, "fmt": "alpaca", "templates": ["summarise", "age"]}
+        )
+        assert r.status_code == 200, r.text
+        j = r.json()
+        assert j["format"] == "alpaca" and j["version"] == 1
+        assert j["count"] >= 2  # >=1 chunk × 2 templates
+        for line in j["jsonl"].splitlines():
+            rec = json.loads(line)
+            assert "instruction" in rec and "output" in rec
+
+        assert (
+            client.post("/dataset", json={"source_id": sid, "templates": ["nope"]}).status_code
+            == 422
+        )
+        assert client.post("/dataset", json={"source_id": "nope"}).status_code == 404

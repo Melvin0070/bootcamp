@@ -25,7 +25,7 @@ describes the spine shipped in PR0.
 | silver | `ingest.extract` + `ingest.handler` (S3 Lambda) | `RawDocument` (text + provenance) | txt/md/pdf/pptx; S3 raw→silver |
 | gold   | `chunking` (clean + semantic) | `Chunk[]` (fossil fragments) + JSONL/Parquet | clean + token-aware chunks w/ overlap; versioned layers |
 | vector | `embedding` (mock/local/Bedrock) + `vectorstore` | `(model_id, dim)` index | pluggable embedder; DynamoDB idempotency skip; pgvector |
-| served | `api` (+ `llm`, `enrichment`) | hits, summaries, layers, diffs, markers, chat, edits | `/excavate`; `/mutate`; `/timetravel`; `/diff`; `/enrich`+`/markers`; `/chat`; `/slide/mutate` (edit + diff + version) |
+| served | `api` (+ `llm`, `enrichment`, `dataset`) | hits, summaries, layers, diffs, markers, chat, edits, datasets | `/excavate`; `/mutate`; `/timetravel`; `/diff`; `/enrich`+`/markers`; `/chat`; `/slide/mutate`; `/dataset` (JSONL fine-tune pairs) |
 
 ## Component diagram (v0)
 
