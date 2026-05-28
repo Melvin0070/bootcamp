@@ -1,0 +1,93 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fossilrag"
+version = "0.1.0"
+description = "Serverless, self-healing document enrichment & retrieval — the Dinosaur Whisperer's fossil excavation engine."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "FossilRAG" }]
+keywords = ["rag", "serverless", "embeddings", "pgvector", "bedrock", "fastapi"]
+
+# Runtime dependencies. Versions are floors pinned to the latest stable
+# observed 2026-05 (see docs/adr/0001-foundational-decisions.md for the
+# research that fixed these). Heavy/optional backends (sentence-transformers,
+# boto3, faiss, opensearch-py) are pulled in via extras so the core API image
+# stays small and Lambda-friendly.
+dependencies = [
+    "fastapi>=0.136",
+    "uvicorn[standard]>=0.34",
+    "pydantic>=2.13",
+    "pydantic-settings>=2.14",
+    "asyncpg>=0.30",
+    "pgvector>=0.3.6",
+    "numpy>=2.1",
+]
+
+[project.optional-dependencies]
+# Local CPU embedding fallback (dev/compose). torch+transformers ~2GB — never
+# shipped in a Lambda zip; that is precisely why Bedrock is the cloud default.
+local-embeddings = ["sentence-transformers>=5.5"]
+# AWS cloud backends (Bedrock LLM + Titan embeddings, DynamoDB, S3, SQS).
+aws = ["boto3>=1.43"]
+# Alternate vector backends.
+faiss = ["faiss-cpu>=1.9"]
+opensearch = ["opensearch-py>=2.6", "boto3>=1.43"]
+# Document extraction (deepened in PR1).
+extract = ["pypdf>=6.0", "python-pptx>=1.0.2"]
+dev = [
+    "pytest>=8.4",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
+    "httpx>=0.28",
+    "moto[s3,dynamodb,sqs]>=5.0",
+    "ruff>=0.15",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fossilrag"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom puts Depends()/Query()/Body() in arg
+# defaults by design; these are not the mutable-default footgun B008 targets.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Form",
+]
+
+[tool.coverage.report]
+# Don't count un-executable lines: Protocol stubs, type-only imports, defensive
+# re-raises. Keeps the 85% gate honest (about real logic, not ellipses).
+exclude_also = [
+    "\\.\\.\\.",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "integration: tests that need a live Postgres+pgvector (DATABASE_URL); run in CI",
+]
