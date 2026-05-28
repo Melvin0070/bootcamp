@@ -12,11 +12,13 @@ from fossilrag.embedding import make_embedder
 from fossilrag.embedding.mock import MockEmbedder
 from fossilrag.ingest.extract import extract_document
 from fossilrag.models import (
+    ExcavateHit,
     RawDocument,
     compute_chunk_id,
     compute_doc_id,
     geological_age_for,
 )
+from fossilrag.mutate import mock_summarise
 
 # --- MockEmbedder --------------------------------------------------------
 
@@ -143,6 +145,35 @@ def test_chunker_tags_layer_version_and_age():
     chunks = chunk_document(doc, layer_version=3)
     assert chunks[0].layer_version == 3
     assert chunks[0].geological_age == geological_age_for(3)
+
+
+# --- mock summariser (/mutate, PR0) --------------------------------------
+
+
+def _hit(content: str, score: float) -> ExcavateHit:
+    return ExcavateHit(
+        chunk_id="c",
+        doc_id="d",
+        ordinal=0,
+        content=content,
+        score=score,
+        layer_version=1,
+        geological_age="Holocene",
+    )
+
+
+def test_mock_summarise_empty():
+    assert "nothing to summarise" in mock_summarise("q", None, [])
+
+
+def test_mock_summarise_extracts_first_sentences():
+    hits = [_hit("Alpha fact. More detail.", 0.9), _hit("Beta fact.", 0.8)]
+    out = mock_summarise("q", "be concise", hits)
+    assert "2 retrieved fossil" in out
+    assert "be concise" in out
+    assert "- Alpha fact" in out  # first sentence only (split on '. ')
+    assert "More detail" not in out
+    assert "- Beta fact." in out
 
 
 # --- settings ------------------------------------------------------------

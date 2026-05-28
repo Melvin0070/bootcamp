@@ -11,9 +11,11 @@ Design choices (see docs/adr/0001 for the research that fixed them):
   operator. The operator MUST match the opclass or pgvector silently falls
   back to a sequential scan. Recall is tuned per-session via
   ``hnsw.ef_search`` (kept >= the served top-k).
-* **Idempotent upsert** on ``chunk_id`` (content-addressed) — re-running the
-  pipeline over the same corpus rewrites identical rows instead of
-  duplicating fossils.
+* **Idempotent upsert** keyed on ``(chunk_id, model_id, embed_dim)`` — re-running
+  the pipeline rewrites identical rows instead of duplicating fossils, while
+  the same content-addressed chunk embedded by a *different* model coexists as
+  its own provenance layer rather than overwriting. ``search()`` filters to a
+  single ``(model_id, dim)`` space so layers are never cross-queried.
 
 The connection ``init`` ensures the ``vector`` extension exists and registers
 the pgvector codec on every pooled connection, so numpy float32 arrays pass
@@ -106,7 +108,7 @@ class PgVectorStore:
         """Create the chunks table and the HNSW cosine index if absent."""
         ddl = f"""
             CREATE TABLE IF NOT EXISTS {self._table} (
-                chunk_id       text PRIMARY KEY,
+                chunk_id       text NOT NULL,
                 doc_id         text NOT NULL,
                 ordinal        integer NOT NULL,
                 content        text NOT NULL,
@@ -116,13 +118,24 @@ class PgVectorStore:
                 embed_dim      integer NOT NULL,
                 metadata       jsonb NOT NULL DEFAULT '{{}}'::jsonb,
                 ingested_at    timestamptz NOT NULL DEFAULT now(),
-                embedding      vector({self._dim}) NOT NULL
+                embedding      vector({self._dim}) NOT NULL,
+                -- Composite key enforces (model_id, dim) provenance isolation:
+                -- the same content-addressed chunk can coexist as separate
+                -- fossils under different embedding models (e.g. mock vs local,
+                -- both 384-dim yet incomparable vector spaces) without one
+                -- overwriting the other. search() filters to a single space.
+                PRIMARY KEY (chunk_id, model_id, embed_dim)
             );
         """
         doc_idx = f"CREATE INDEX IF NOT EXISTS {self._table}_doc_id_idx ON {self._table} (doc_id);"
         layer_idx = (
             f"CREATE INDEX IF NOT EXISTS {self._table}_layer_idx "
             f"ON {self._table} (doc_id, layer_version);"
+        )
+        # Supports the provenance filter in search()/count() and per-layer ops.
+        prov_idx = (
+            f"CREATE INDEX IF NOT EXISTS {self._table}_provenance_idx "
+            f"ON {self._table} (model_id, embed_dim);"
         )
         # HNSW + cosine. Defaults m=16, ef_construction=64 are fine at this
         # scale; tuned higher only if recall demands it (docs/adr/0001).
@@ -135,6 +148,7 @@ class PgVectorStore:
             await conn.execute(ddl)
             await conn.execute(doc_idx)
             await conn.execute(layer_idx)
+            await conn.execute(prov_idx)
             await conn.execute(hnsw)
         log.info("event=pgvector_bootstrapped table=%s dim=%d", self._table, self._dim)
 
@@ -180,12 +194,10 @@ class PgVectorStore:
                 (chunk_id, doc_id, ordinal, content, layer_version, geological_age,
                  model_id, embed_dim, metadata, ingested_at, embedding)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
-            ON CONFLICT (chunk_id) DO UPDATE SET
+            ON CONFLICT (chunk_id, model_id, embed_dim) DO UPDATE SET
                 content        = EXCLUDED.content,
                 layer_version  = EXCLUDED.layer_version,
                 geological_age = EXCLUDED.geological_age,
-                model_id       = EXCLUDED.model_id,
-                embed_dim      = EXCLUDED.embed_dim,
                 metadata       = EXCLUDED.metadata,
                 ingested_at    = EXCLUDED.ingested_at,
                 embedding      = EXCLUDED.embedding;
@@ -214,17 +226,27 @@ class PgVectorStore:
         # so format it directly. SET LOCAL scopes it to this transaction so
         # pooled connections don't leak the setting. Keep ef_search >= k.
         ef = max(self._ef_search, k)
+        # Provenance isolation: only ever search this store's own
+        # (model_id, dim) vector space. Vectors from a different model in the
+        # same table are a different, incomparable space and must not leak into
+        # results — this enforces the invariant the column dim alone can't
+        # (two models can share a dim, e.g. mock vs all-MiniLM at 384).
         sql = f"""
             SELECT chunk_id, doc_id, ordinal, content, layer_version,
                    geological_age, metadata,
                    1 - (embedding <=> $1) AS score
             FROM {self._table}
+            WHERE model_id = $2 AND embed_dim = $3
             ORDER BY embedding <=> $1
-            LIMIT $2;
+            LIMIT $4;
         """
         async with self._pool.acquire() as conn, conn.transaction():
             await conn.execute(f"SET LOCAL hnsw.ef_search = {ef}")
-            records = await conn.fetch(sql, qv, k)
+            # Relaxed-order iterative scan keeps the filtered ANN query from
+            # under-returning (overfiltering) when the table holds more than
+            # one provenance layer (pgvector 0.8+).
+            await conn.execute("SET LOCAL hnsw.iterative_scan = relaxed_order")
+            records = await conn.fetch(sql, qv, self._model_id, self._dim, k)
 
         return [
             ExcavateHit(
@@ -241,8 +263,15 @@ class PgVectorStore:
         ]
 
     async def count(self) -> int:
+        """Row count for THIS store's (model_id, embed_dim) provenance layer."""
         async with self._pool.acquire() as conn:
-            return int(await conn.fetchval(f"SELECT count(*) FROM {self._table}"))
+            return int(
+                await conn.fetchval(
+                    f"SELECT count(*) FROM {self._table} WHERE model_id = $1 AND embed_dim = $2",
+                    self._model_id,
+                    self._dim,
+                )
+            )
 
     async def healthcheck(self) -> bool:
         async with self._pool.acquire() as conn:

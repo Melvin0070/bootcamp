@@ -156,3 +156,20 @@ class ExcavateResponse(BaseModel):
     k: int
     hits: list[ExcavateHit]
     latency_ms: float
+
+
+class MutateResponse(BaseModel):
+    """Result of ``/mutate``: a summary/edit grounded in retrieved fossils.
+
+    ``mock`` is True while the LLM is the PR0 placeholder; PR4 swaps in AWS
+    Bedrock (Converse API) + Prompt Fossilization behind a provider interface
+    and flips it to False.
+    """
+
+    query: str
+    instruction: str | None = None
+    summary: str
+    mock: bool
+    used_chunks: list[ExcavateHit]
+    note: str
+    latency_ms: float

@@ -45,11 +45,13 @@ make e2e                      # up -> ingest -> excavate -> assert -> down
 |--------|-------------|---------|
 | `GET`  | `/excavate` | Embed a query, return top-k nearest fossil chunks + geological-age metadata |
 | `POST` | `/ingest`   | Run a document through the full spine and index its fossils |
+| `POST` | `/mutate`   | Retrieve relevant fossils and return a grounded summary/edit (**mock LLM in PR0**; real Bedrock Converse + Prompt Fossilization in PR4) |
 | `GET`  | `/healthz`  | Pool + store readiness |
 | `GET`  | `/`         | Service info |
 
-`/mutate` (LLM summary/edit + Prompt Fossilization) and the mutation
-endpoints (`/timetravel`, `/diff`, `/dataset`) arrive in later PRs.
+`/mutate` currently returns a deterministic mock summary (`mock: true`) so the
+full surface is callable at $0. The further mutation endpoints (`/timetravel`,
+`/diff`, `/dataset`) arrive in later PRs.
 
 ---
 

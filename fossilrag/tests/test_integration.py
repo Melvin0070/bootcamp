@@ -90,6 +90,49 @@ async def test_upsert_rejects_dim_mismatch():
         await store.close()
 
 
+async def test_provenance_isolation_same_dim():
+    """Two different models at the SAME dim in the SAME table must not mix.
+
+    mock and all-MiniLM are both 384-dim yet incomparable spaces, so this is
+    the real hazard. Composite key (chunk_id, model_id, embed_dim) prevents
+    overwrite; the provenance filter in search() prevents cross-model hits.
+    """
+    from fossilrag.config import Settings
+    from fossilrag.embedding.mock import MockEmbedder
+    from fossilrag.vectorstore.pgvector import PgVectorStore
+
+    table = "test_fossils_" + uuid.uuid4().hex[:8]
+    dim = 32
+    texts = ["alpha", "beta", "gamma"]
+    chunks = await _build_chunks("shared-doc", texts)  # identical chunk_ids for both
+
+    s_a = Settings(embed_model="model-A", embed_dim=dim, vector_table=table)
+    s_b = Settings(embed_model="model-B", embed_dim=dim, vector_table=table)
+    store_a = await PgVectorStore.connect(s_a)
+    store_b = await PgVectorStore.connect(s_b)
+    try:
+        await store_a.bootstrap()
+        await store_b.bootstrap()  # idempotent; same physical table
+
+        await store_a.upsert_chunks(chunks, MockEmbedder("model-A", dim).encode(texts))
+        await store_b.upsert_chunks(chunks, MockEmbedder("model-B", dim).encode(texts))
+
+        # No overwrite: each provenance layer keeps its own 3 rows (6 total).
+        assert await store_a.count() == 3
+        assert await store_b.count() == 3
+
+        # Isolated search: store_a sees only model-A's rows (3, not 6) even
+        # with k=10, despite identical chunk_ids/vectors in model-B's layer.
+        hits = await store_a.search(MockEmbedder("model-A", dim).encode_one("beta"), k=10)
+        assert len(hits) == 3
+        assert {h.chunk_id for h in hits} == {c.chunk_id for c in chunks}
+    finally:
+        async with store_a._pool.acquire() as conn:
+            await conn.execute(f"DROP TABLE IF EXISTS {table}")
+        await store_a.close()
+        await store_b.close()
+
+
 def test_excavate_endpoint_e2e():
     """Full HTTP spine through the FastAPI app, including top-k ranking.
 
@@ -131,6 +174,14 @@ def test_excavate_endpoint_e2e():
         assert len(hits) == 3
         assert "thagomizer" in hits[0]["content"]
         assert hits[0]["score"] > 0.99
+
+        # /mutate (mock) retrieves and grounds a summary in the same fossils.
+        m = client.post("/mutate", json={"query": spike_para, "k": 3, "instruction": "be concise"})
+        assert m.status_code == 200
+        mr = m.json()
+        assert mr["mock"] is True
+        assert len(mr["used_chunks"]) == 3
+        assert "thagomizer" in mr["summary"]
 
         # Unsupported content type → clean 422, not a 500.
         bad = client.post(

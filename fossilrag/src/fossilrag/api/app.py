@@ -1,10 +1,13 @@
-"""FastAPI app: ``/excavate`` (top-k retrieval) + ``/ingest`` (spine demo).
+"""FastAPI app: ``/excavate`` (top-k retrieval), ``/ingest`` (spine), ``/mutate``.
 
 Lifespan wiring follows the FastAPI 0.136 + house pattern: the embedder and
 the connected/bootstrapped vector store are built once at startup, stored on
 ``app.state``, and reached in handlers via ``Depends`` providers — never a
-per-request handshake. ``/mutate`` and the mutation endpoints (time-travel,
-diff, dataset) are layered on in later PRs without disturbing this surface.
+per-request handshake. ``/mutate`` is a thin mock stub in PR0 (retrieve →
+placeholder summary) so the full API surface is callable; the real LLM (AWS
+Bedrock Converse + Prompt Fossilization) and the further mutation endpoints
+(time-travel, diff, dataset) are deepened in later PRs without disturbing this
+surface.
 """
 
 from __future__ import annotations
@@ -20,7 +23,8 @@ from fossilrag.config import Settings, get_settings
 from fossilrag.embedding import make_embedder
 from fossilrag.embedding.base import Embedder
 from fossilrag.logging import configure_logging, get_logger
-from fossilrag.models import ExcavateResponse, IngestResult
+from fossilrag.models import ExcavateResponse, IngestResult, MutateResponse
+from fossilrag.mutate import MOCK_NOTE, mock_summarise
 from fossilrag.pipeline import ingest_document
 from fossilrag.vectorstore import make_vector_store
 from fossilrag.vectorstore.base import VectorStore
@@ -94,6 +98,12 @@ class IngestRequest(BaseModel):
     layer_version: int = Field(default=1, ge=1)
 
 
+class MutateRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=1024)
+    k: int = Field(default=5, ge=1, le=50)
+    instruction: str | None = Field(default=None, max_length=512)
+
+
 # -- endpoints ------------------------------------------------------------
 
 
@@ -105,7 +115,7 @@ async def root(settings: Settings = Depends(settings_dep)) -> dict:
         "embed_model": settings.embed_model,
         "embed_dim": settings.embed_dim,
         "vector_backend": "pgvector",
-        "endpoints": ["/excavate", "/ingest", "/healthz"],
+        "endpoints": ["/excavate", "/ingest", "/mutate", "/healthz"],
     }
 
 
@@ -161,3 +171,42 @@ async def excavate(
     latency_ms = (time.perf_counter() - t0) * 1000
     log.info("event=excavate q=%r k=%d hits=%d latency_ms=%.2f", q, k, len(hits), latency_ms)
     return ExcavateResponse(query=q, k=k, hits=hits, latency_ms=latency_ms)
+
+
+@app.post("/mutate", response_model=MutateResponse)
+async def mutate(
+    req: MutateRequest,
+    store: VectorStore = Depends(get_store),
+    embedder: Embedder = Depends(get_embedder),
+) -> MutateResponse:
+    """Retrieve relevant fossils and return a summary/edit grounded in them.
+
+    PR0 ships a deterministic MOCK summary (``mock=True``) so the endpoint is
+    callable end-to-end with no LLM/keys; PR4 swaps in AWS Bedrock (Converse)
+    + Prompt Fossilization behind a provider interface and flips ``mock`` off.
+    """
+    t0 = time.perf_counter()
+    query_vec = embedder.encode_one(req.query)
+    try:
+        hits = await store.search(query_vec, req.k)
+    except Exception:
+        log.exception("event=mutate_failed q=%r", req.query)
+        raise HTTPException(status_code=500, detail="mutation failed") from None
+    summary = mock_summarise(req.query, req.instruction, hits)
+    latency_ms = (time.perf_counter() - t0) * 1000
+    log.info(
+        "event=mutate q=%r k=%d hits=%d mock=true latency_ms=%.2f",
+        req.query,
+        req.k,
+        len(hits),
+        latency_ms,
+    )
+    return MutateResponse(
+        query=req.query,
+        instruction=req.instruction,
+        summary=summary,
+        mock=True,
+        used_chunks=hits,
+        note=MOCK_NOTE,
+        latency_ms=latency_ms,
+    )
