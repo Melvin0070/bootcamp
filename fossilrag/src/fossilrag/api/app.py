@@ -12,6 +12,7 @@ are deepened in later PRs without disturbing this surface.
 from __future__ import annotations
 
 import contextlib
+import json
 import time
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -28,6 +29,8 @@ from fossilrag.llm.base import LLMProvider
 from fossilrag.llm.cache import PromptCache
 from fossilrag.logging import configure_logging, get_logger
 from fossilrag.models import (
+    ChatMessage,
+    ChatResponse,
     EnrichmentRecord,
     ExcavateResponse,
     FossilDiffResponse,
@@ -134,6 +137,13 @@ class MutateRequest(BaseModel):
     instruction: str | None = Field(default=None, max_length=512)
 
 
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage] = Field(min_length=1)
+    k: int = Field(default=5, ge=1, le=50)
+    # Optional: scope retrieval to one document ("select an existing fossil").
+    source_id: str | None = Field(default=None, max_length=512)
+
+
 # -- endpoints ------------------------------------------------------------
 
 
@@ -153,6 +163,7 @@ async def root(settings: Settings = Depends(settings_dep)) -> dict:
             "/diff",
             "/enrich",
             "/markers",
+            "/chat",
             "/healthz",
         ],
     }
@@ -197,6 +208,7 @@ async def ingest(
 async def excavate(
     q: str = Query(..., min_length=1, max_length=1024, description="Natural-language query."),
     k: int = Query(5, ge=1, le=50, description="Number of fossils to return."),
+    source_id: str | None = Query(None, description="Scope to one document (optional)."),
     store: VectorStore = Depends(get_store),
     embedder: Embedder = Depends(get_embedder),
 ) -> ExcavateResponse:
@@ -204,7 +216,7 @@ async def excavate(
     t0 = time.perf_counter()
     query_vec = embedder.encode_one(q)
     try:
-        hits = await store.search(query_vec, k)
+        hits = await store.search(query_vec, k, source_id)
     except Exception:
         log.exception("event=excavate_failed q=%r", q)
         raise HTTPException(status_code=500, detail="excavation failed") from None
@@ -388,3 +400,69 @@ async def markers(
             status_code=404, detail=f"no enrichment for source_id {source_id!r} v{version}"
         )
     return record
+
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(
+    req: ChatRequest,
+    store: VectorStore = Depends(get_store),
+    embedder: Embedder = Depends(get_embedder),
+    llm: LLMProvider = Depends(get_llm),
+    cache: PromptCache = Depends(get_prompt_cache),
+) -> ChatResponse:
+    """Chat-Based Fossil Excavation: answer the latest turn, grounded in fossils.
+
+    Retrieves for the latest user message (optionally scoped to one document),
+    answers via the LLM with the full conversation, and cites the fossils used
+    (with geological age). Prompt Fossilization caches per (model, dialogue,
+    retrieved fossils).
+    """
+    t0 = time.perf_counter()
+    last_user = next((m.content for m in reversed(req.messages) if m.role == "user"), None)
+    if last_user is None:
+        raise HTTPException(status_code=422, detail="conversation must contain a user message")
+
+    query_vec = embedder.encode_one(last_user)
+    try:
+        hits = await store.search(query_vec, req.k, req.source_id)
+    except Exception:
+        log.exception("event=chat_retrieval_failed")
+        raise HTTPException(status_code=500, detail="retrieval failed") from None
+
+    is_mock = llm.model_id.startswith("mock")
+    convo = json.dumps([{"role": m.role, "content": m.content} for m in req.messages])
+    key = fossil_key(llm.model_id, convo, "chat", hits)
+    try:
+        cached_answer = cache.get(key)
+    except Exception:
+        log.warning("event=chat_cache_get_failed")
+        cached_answer = None
+    if cached_answer is not None:
+        answer, cached = cached_answer, True
+    else:
+        try:
+            result = llm.chat(messages=req.messages, hits=hits)
+        except Exception:
+            log.exception("event=chat_llm_failed model=%s", llm.model_id)
+            raise HTTPException(status_code=502, detail="LLM provider error") from None
+        answer, cached = result.text, False
+        with contextlib.suppress(Exception):
+            cache.put(key, answer)
+
+    latency_ms = (time.perf_counter() - t0) * 1000
+    log.info(
+        "event=chat turns=%d hits=%d model=%s cached=%s latency_ms=%.2f",
+        len(req.messages),
+        len(hits),
+        llm.model_id,
+        cached,
+        latency_ms,
+    )
+    return ChatResponse(
+        answer=answer,
+        model_id=llm.model_id,
+        mock=is_mock,
+        cached=cached,
+        citations=hits,
+        latency_ms=latency_ms,
+    )

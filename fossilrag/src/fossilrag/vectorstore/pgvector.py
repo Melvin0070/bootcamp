@@ -245,44 +245,54 @@ class PgVectorStore:
 
     # -- reads ------------------------------------------------------------
 
-    async def search(self, query_vector: np.ndarray, k: int) -> list[ExcavateHit]:
-        """Top-k cosine-nearest chunks. Score is cosine similarity (1 - distance)."""
+    async def search(
+        self, query_vector: np.ndarray, k: int, source_id: str | None = None
+    ) -> list[ExcavateHit]:
+        """Top-k cosine-nearest chunks. Score is cosine similarity (1 - distance).
+
+        When ``source_id`` is given, retrieval is scoped to that one logical
+        document (Chat-Based Fossil Excavation's "select an existing fossil").
+        """
         if k < 1:
             return []
         qv = np.asarray(query_vector, dtype=np.float32).ravel()
         if qv.shape[0] != self._dim:
             raise ValueError(f"query dim {qv.shape[0]} != store dim {self._dim}")
 
-        # ef_search is an int from validated config; SET takes no bind params,
-        # so format it directly. SET LOCAL scopes it to this transaction so
-        # pooled connections don't leak the setting. Keep ef_search >= k.
-        ef = max(self._ef_search, k)
         # Provenance isolation: only ever search this store's own
-        # (model_id, dim) vector space. Vectors from a different model in the
-        # same table are a different, incomparable space and must not leak into
-        # results — this enforces the invariant the column dim alone can't
-        # (two models can share a dim, e.g. mock vs all-MiniLM at 384).
+        # (model_id, dim) vector space (two models can share a dim, e.g. mock
+        # vs all-MiniLM at 384). Param numbering is built dynamically so the
+        # optional source_id filter slots in before the LIMIT placeholder.
+        where = "WHERE model_id = $2 AND embed_dim = $3"
+        args: list = [qv, self._model_id, self._dim]
+        if source_id is not None:
+            args.append(source_id)
+            where += f" AND source_id = ${len(args)}"
+        args.append(k)
+        limit_ph = f"${len(args)}"
         sql = f"""
-            SELECT chunk_id, doc_id, ordinal, content, layer_version,
+            SELECT chunk_id, doc_id, source_id, ordinal, content, layer_version,
                    geological_age, metadata,
                    1 - (embedding <=> $1) AS score
             FROM {self._table}
-            WHERE model_id = $2 AND embed_dim = $3
+            {where}
             ORDER BY embedding <=> $1
-            LIMIT $4;
+            LIMIT {limit_ph};
         """
+        ef = max(self._ef_search, k)  # keep ef_search >= k
         async with self._pool.acquire() as conn, conn.transaction():
+            # SET LOCAL scopes these to the txn so pooled connections don't leak
+            # the settings; relaxed-order iterative scan avoids overfiltering the
+            # filtered ANN query (pgvector 0.8+).
             await conn.execute(f"SET LOCAL hnsw.ef_search = {ef}")
-            # Relaxed-order iterative scan keeps the filtered ANN query from
-            # under-returning (overfiltering) when the table holds more than
-            # one provenance layer (pgvector 0.8+).
             await conn.execute("SET LOCAL hnsw.iterative_scan = relaxed_order")
-            records = await conn.fetch(sql, qv, self._model_id, self._dim, k)
+            records = await conn.fetch(sql, *args)
 
         return [
             ExcavateHit(
                 chunk_id=r["chunk_id"],
                 doc_id=r["doc_id"],
+                source_id=r["source_id"],
                 ordinal=r["ordinal"],
                 content=r["content"],
                 score=float(r["score"]),

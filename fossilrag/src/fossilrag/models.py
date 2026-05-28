@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -139,6 +140,7 @@ class ExcavateHit(BaseModel):
 
     chunk_id: str
     doc_id: str
+    source_id: str = ""
     ordinal: int
     content: str
     score: float = Field(description="Cosine similarity in [-1, 1]; higher is closer.")
@@ -236,3 +238,26 @@ class EnrichmentRecord(BaseModel):
     layer_version: int
     markers: list[Marker]
     counts: dict[str, int]
+
+
+class ChatMessage(BaseModel):
+    """One turn of a Chat-Based Fossil Excavation conversation.
+
+    ``role`` is constrained to user/assistant so an invalid role is rejected at
+    the API validation layer (422) rather than forwarded to the LLM provider
+    (which would surface as an opaque 502).
+    """
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1)
+
+
+class ChatResponse(BaseModel):
+    """Assistant answer grounded in retrieved fossils, with citations."""
+
+    answer: str
+    model_id: str
+    mock: bool
+    cached: bool = False
+    citations: list[ExcavateHit]
+    latency_ms: float

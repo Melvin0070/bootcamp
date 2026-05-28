@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-from fossilrag.models import ExcavateHit
+from fossilrag.models import ChatMessage, ExcavateHit
 
 SYSTEM_PROMPT = (
     "You are FossilRAG, a precise document-enrichment assistant for the "
@@ -40,6 +40,21 @@ def build_prompt(query: str, instruction: str | None, hits: list[ExcavateHit]) -
     return SYSTEM_PROMPT, user
 
 
+def build_chat(messages: list[ChatMessage], hits: list[ExcavateHit]) -> tuple[str, list[dict]]:
+    """Return ``(system, turns)`` for a multi-turn chat grounded in the fossils.
+
+    The retrieved fossils go into the system prompt (shared across turns); the
+    conversation history is passed as native role/content turns so a real
+    provider sees the full dialogue.
+    """
+    context = (
+        "\n".join(f"- [{h.geological_age}] {h.content}" for h in hits) or "(no fossils retrieved)"
+    )
+    system = f"{SYSTEM_PROMPT}\n\nFossil context for this conversation:\n{context}"
+    turns = [{"role": m.role, "content": m.content} for m in messages]
+    return system, turns
+
+
 @runtime_checkable
 class LLMProvider(Protocol):
     @property
@@ -49,4 +64,8 @@ class LLMProvider(Protocol):
         self, *, query: str, instruction: str | None, hits: list[ExcavateHit]
     ) -> LLMResult:
         """Generate a summary/edit grounded in ``hits``."""
+        ...
+
+    def chat(self, *, messages: list[ChatMessage], hits: list[ExcavateHit]) -> LLMResult:
+        """Answer the latest user turn, grounded in ``hits``, given the dialogue."""
         ...

@@ -293,3 +293,46 @@ def test_enrich_and_markers_e2e():
         assert got.json()["counts"] == rec["counts"]
 
         assert client.get("/markers", params={"source_id": "nope", "version": 1}).status_code == 404
+
+
+def test_chat_e2e():
+    """Chat-Based Fossil Excavation: grounded answer + citations + cache + 422."""
+    from fastapi.testclient import TestClient
+
+    from fossilrag.api.app import app
+
+    with TestClient(app) as client:
+        client.post(
+            "/ingest",
+            json={
+                "filename": "chatdoc.txt",
+                "text": "Stegosaurus had two rows of bony plates. It lived in the Late Jurassic.",
+                "source_id": "chatdoc",
+            },
+        ).raise_for_status()
+
+        body = {
+            "messages": [{"role": "user", "content": "Tell me about the plates"}],
+            "k": 3,
+            "source_id": "chatdoc",
+        }
+        r = client.post("/chat", json=body)
+        assert r.status_code == 200, r.text
+        j = r.json()
+        assert j["mock"] is True and j["cached"] is False
+        assert j["model_id"] == "mock-llm-v1"
+        assert j["citations"]  # grounded in retrieved fossils
+        assert "geological_age" in j["citations"][0]
+        assert all(c["source_id"] == "chatdoc" for c in j["citations"])  # source-scoped
+
+        # Prompt Fossilization: identical conversation → cache hit.
+        assert client.post("/chat", json=body).json()["cached"] is True
+
+        # No user message → 422.
+        bad = client.post("/chat", json={"messages": [{"role": "assistant", "content": "hi"}]})
+        assert bad.status_code == 422
+
+        # Source-scoped /excavate returns only this document's fossils.
+        ex = client.get("/excavate", params={"q": "plates", "k": 5, "source_id": "chatdoc"})
+        assert ex.status_code == 200
+        assert ex.json()["hits"] and all(h["source_id"] == "chatdoc" for h in ex.json()["hits"])
