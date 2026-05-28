@@ -60,9 +60,9 @@ full surface is callable at $0. The further mutation endpoints (`/timetravel`,
 ```
             ┌──────────── ingest ───────────┐   ┌──── gold ────┐   ┌── vector ──┐
   upload →  │ extract text + provenance     │ → │ clean +      │ → │ embed +    │
- (S3 raw)   │ (txt → silver JSON/Parquet)   │   │ semantic     │   │ idempotent │
-            └───────────────────────────────┘   │ chunk        │   │ upsert     │
-                                                 └──────────────┘   └─────┬──────┘
+ (S3 raw)   │ txt/md/pdf/pptx → silver JSON  │   │ semantic     │   │ idempotent │
+   │        │ (S3-event Lambda)             │   │ chunk        │   │ upsert     │
+   └─event─▶└───────────────────────────────┘   └──────────────┘   └─────┬──────┘
                                                                           │
                           ┌─────────────── FastAPI ────────────────┐      │
                   query → │ /excavate  top-k cosine search          │ ←────┘
@@ -97,8 +97,8 @@ FossilRAG implements **all three** brief use cases as one composed system, and
 
 | PR | Status | Deepens |
 |----|--------|---------|
-| 0  | 🚧 | **Walking skeleton** — ingest → chunk → mock-embed → pgvector → `/excavate` |
-| 1  | ⬜ | Ingestion: real PPTX/PDF/TXT, S3 raw→silver, S3-event Lambda |
+| 0  | ✅ | **Walking skeleton** — ingest → chunk → mock-embed → pgvector → `/excavate` (+ mock `/mutate`) |
+| 1  | ✅ | Ingestion: real PPTX/PDF/TXT/MD extraction, S3 raw→silver, S3-event Lambda |
 | 2  | ⬜ | Chunking: cleaning + semantic chunks + versioned fossil layers |
 | 3  | ⬜ | Embedding: local + Bedrock Titan v2 + DynamoDB idempotency; FAISS/AOSS backends |
 | 4  | ⬜ | `/mutate` + Prompt Fossilization (Bedrock Converse + prompt cache) |

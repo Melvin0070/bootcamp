@@ -1,0 +1,59 @@
+# FossilRAG — Runbook
+
+Operational guide. Grows with each PR; currently covers the retrieval API
+(PR0) and the serverless ingestion pipeline (PR1).
+
+## Components & triggers
+
+| Component | Trigger | Reads | Writes |
+|-----------|---------|-------|--------|
+| Ingestion Lambda (`ingest.handler`) | S3 `ObjectCreated:*` on the raw bucket | raw object | silver JSON (`s3://<silver>/silver/<doc_id>.json`) |
+| Retrieval API (`api.app`) | HTTP | pgvector | — |
+
+## Configuration (env)
+
+All via `pydantic-settings` (`FOSSILRAG_*`; `DATABASE_URL`/`AWS_ENDPOINT_URL`
+also read unprefixed). See `.env.example`.
+
+| Var | Purpose |
+|-----|---------|
+| `DATABASE_URL` | Postgres+pgvector DSN (API) |
+| `FOSSILRAG_SILVER_BUCKET` | destination bucket for silver JSON (ingestion Lambda) |
+| `FOSSILRAG_SILVER_PREFIX` | key prefix (default `silver`) |
+| `FOSSILRAG_AWS_REGION` / `AWS_ENDPOINT_URL` | region; endpoint override for LocalStack |
+| `FOSSILRAG_EMBED_PROVIDER` / `_MODEL` / `_DIM` | embedding provider + provenance |
+
+## Ingestion behaviour
+
+- **Idempotent by content addressing.** `doc_id = sha256(full_s3_key + text)`;
+  the silver key is `silver/<doc_id>.json`, so a redelivered S3 event
+  overwrites the same object with identical bytes — no duplicates, no
+  corruption. (A *compute-skip* ledger to avoid re-extracting at all is the
+  Self-Healing Idempotency mutation, PR3.)
+- **Failure handling.** A per-record extraction failure (corrupt/unsupported
+  body) is normalised to a `ValueError`, collected, and the invocation
+  re-raises at the end so the platform retries and — once PR10 lands — routes
+  exhausted retries to an SQS DLQ. A *structurally malformed* event record
+  (missing bucket/key) is logged and skipped (retry can't fix it).
+
+## Common procedures
+
+- **Reprocess a document:** re-upload it to the raw bucket (or replay the S3
+  event). Content-addressing makes this safe to repeat.
+- **Inspect a fossil's provenance:** read `silver/<doc_id>.json` — it carries
+  `filename`, `source_uri`, `content_type`, `uploaded_at`, and the extractor.
+- **Drain a DLQ (PR10):** redrive from the DLQ to the source queue after
+  fixing the root cause.
+
+## Local development
+
+- API + pgvector: `make up`, then `make seed` / `curl /excavate`. `make down`.
+- AWS-service behaviour is exercised in tests via **moto** (`$0`, no account).
+  The compose demo (PR12) uses **LocalStack** for S3/DynamoDB/SQS — note its
+  free tier needs a `LOCALSTACK_AUTH_TOKEN` and is non-commercial.
+- The dev box has no Docker, so the compose/pgvector paths are **CI-verified**.
+
+## Health & observability
+
+- `GET /healthz` — pool + store readiness. Structured `event=...` logs
+  throughout. CloudWatch EMF metrics + dashboards arrive in PR14.
