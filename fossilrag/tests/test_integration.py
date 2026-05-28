@@ -142,9 +142,12 @@ def test_excavate_endpoint_e2e():
     cosine ~1.0 — so the relevant fossil must come back first. This exercises
     HNSW cosine ordering through the real HTTP path, deterministically.
     """
+    import os
+
     from fastapi.testclient import TestClient
 
     from fossilrag.api.app import app
+    from fossilrag.config import get_settings
 
     spike_para = "Its tail bore four sharp spikes, a feature palaeontologists call a thagomizer."
     text = "\n\n".join(
@@ -157,35 +160,54 @@ def test_excavate_endpoint_e2e():
             "Adults could reach roughly nine metres in length.",
         ]
     )
-    with TestClient(app) as client:
-        assert client.get("/healthz").status_code == 200
-        assert client.get("/").json()["service"] == "fossilrag"
+    # Force tiny chunks so the six single-sentence paragraphs become six chunks
+    # (the default 256-token budget would pack them into one), keeping the
+    # top-k ranking assertion meaningful. overlap=0 keeps each chunk = one
+    # sentence, so the exact-text query self-matches at cosine ~1.0.
+    keys = ("FOSSILRAG_CHUNK_MAX_TOKENS", "FOSSILRAG_CHUNK_OVERLAP_TOKENS")
+    prev = {k: os.environ.get(k) for k in keys}
+    os.environ["FOSSILRAG_CHUNK_MAX_TOKENS"] = "16"  # config min; one sentence/chunk here
+    os.environ["FOSSILRAG_CHUNK_OVERLAP_TOKENS"] = "0"
+    get_settings.cache_clear()
+    try:
+        with TestClient(app) as client:
+            assert client.get("/healthz").status_code == 200
+            assert client.get("/").json()["service"] == "fossilrag"
 
-        r = client.post("/ingest", json={"filename": "stego.txt", "text": text})
-        assert r.status_code == 200, r.text
-        ingested = r.json()
-        assert ingested["chunks_indexed"] == 6
+            r = client.post("/ingest", json={"filename": "stego.txt", "text": text})
+            assert r.status_code == 200, r.text
+            ingested = r.json()
+            assert ingested["chunks_indexed"] == 6
 
-        # Query the exact text of one chunk: it must rank first (k<rows, so
-        # ordering is load-bearing) at near-perfect self-similarity.
-        r = client.get("/excavate", params={"q": spike_para, "k": 3})
-        assert r.status_code == 200
-        hits = r.json()["hits"]
-        assert len(hits) == 3
-        assert "thagomizer" in hits[0]["content"]
-        assert hits[0]["score"] > 0.99
+            # Query the exact text of one chunk: it must rank first (k<rows, so
+            # ordering is load-bearing) at near-perfect self-similarity.
+            r = client.get("/excavate", params={"q": spike_para, "k": 3})
+            assert r.status_code == 200
+            hits = r.json()["hits"]
+            assert len(hits) == 3
+            assert "thagomizer" in hits[0]["content"]
+            assert hits[0]["score"] > 0.99
 
-        # /mutate (mock) retrieves and grounds a summary in the same fossils.
-        m = client.post("/mutate", json={"query": spike_para, "k": 3, "instruction": "be concise"})
-        assert m.status_code == 200
-        mr = m.json()
-        assert mr["mock"] is True
-        assert len(mr["used_chunks"]) == 3
-        assert "thagomizer" in mr["summary"]
+            # /mutate (mock) retrieves and grounds a summary in the same fossils.
+            m = client.post(
+                "/mutate", json={"query": spike_para, "k": 3, "instruction": "be concise"}
+            )
+            assert m.status_code == 200
+            mr = m.json()
+            assert mr["mock"] is True
+            assert len(mr["used_chunks"]) == 3
+            assert "thagomizer" in mr["summary"]
 
-        # Unsupported content type → clean 422, not a 500.
-        bad = client.post(
-            "/ingest",
-            json={"filename": "x.zip", "text": "x", "content_type": "application/zip"},
-        )
-        assert bad.status_code == 422
+            # Unsupported content type → clean 422, not a 500.
+            bad = client.post(
+                "/ingest",
+                json={"filename": "x.zip", "text": "x", "content_type": "application/zip"},
+            )
+            assert bad.status_code == 422
+    finally:
+        for k, v in prev.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        get_settings.cache_clear()

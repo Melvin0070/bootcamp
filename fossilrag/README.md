@@ -99,7 +99,7 @@ FossilRAG implements **all three** brief use cases as one composed system, and
 |----|--------|---------|
 | 0  | ✅ | **Walking skeleton** — ingest → chunk → mock-embed → pgvector → `/excavate` (+ mock `/mutate`) |
 | 1  | ✅ | Ingestion: real PPTX/PDF/TXT/MD extraction, S3 raw→silver, S3-event Lambda |
-| 2  | ⬜ | Chunking: cleaning + semantic chunks + versioned fossil layers |
+| 2  | ✅ | Chunking: cleaning + token-aware semantic chunks w/ overlap + versioned gold (JSONL/Parquet) |
 | 3  | ⬜ | Embedding: local + Bedrock Titan v2 + DynamoDB idempotency; FAISS/AOSS backends |
 | 4  | ⬜ | `/mutate` + Prompt Fossilization (Bedrock Converse + prompt cache) |
 | 5  | ⬜ | Time-Travel Query + Fossil Diff |

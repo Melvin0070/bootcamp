@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from fossilrag.chunking.chunker import chunk_document
 from fossilrag.config import Settings
 from fossilrag.embedding import make_embedder
 from fossilrag.embedding.mock import MockEmbedder
@@ -109,42 +108,11 @@ def test_extract_handles_content_type_params():
     assert doc.content_type == "text/plain"
 
 
-# --- chunking ------------------------------------------------------------
-
-
-def test_chunker_splits_paragraphs_with_stable_ids():
-    doc = RawDocument.from_text(filename="d.txt", text="First para.\n\nSecond para.\n\n\nThird.")
-    chunks = chunk_document(doc)
-    assert [c.content for c in chunks] == ["First para.", "Second para.", "Third."]
-    assert [c.ordinal for c in chunks] == [0, 1, 2]
-    # ids are reproducible from the public helper (idempotent re-chunk)
-    for c in chunks:
-        assert c.chunk_id == compute_chunk_id(doc.doc_id, c.ordinal, c.content)
-    assert all(c.geological_age == "Holocene" for c in chunks)
-
-
-def test_chunker_handles_crlf_and_cr_line_endings():
-    # Uploaded .txt files are often CRLF (Windows) or bare CR (old Mac); both
-    # must still split into paragraphs, not collapse into one giant chunk.
-    crlf = extract_document(
-        filename="win.txt", data=b"First.\r\n\r\nSecond.\r\n\r\nThird.", content_type="text/plain"
-    )
-    assert [c.content for c in chunk_document(crlf)] == ["First.", "Second.", "Third."]
-
-    cr = extract_document(filename="mac.txt", data=b"A\r\rB", content_type="text/plain")
-    assert [c.content for c in chunk_document(cr)] == ["A", "B"]
-
-
-def test_chunker_ignores_blank_documents():
-    doc = RawDocument.from_text(filename="blank.txt", text="   \n\n  \t \n")
-    assert chunk_document(doc) == []
-
-
-def test_chunker_tags_layer_version_and_age():
-    doc = RawDocument.from_text(filename="d.txt", text="only one")
-    chunks = chunk_document(doc, layer_version=3)
-    assert chunks[0].layer_version == 3
-    assert chunks[0].geological_age == geological_age_for(3)
+def test_extract_normalises_crlf():
+    # CRLF/CR are normalised to LF at the decode boundary (chunking tests in
+    # test_chunking.py cover the semantic split).
+    doc = extract_document(filename="win.txt", data=b"A\r\n\r\nB", content_type="text/plain")
+    assert doc.text == "A\n\nB"
 
 
 # --- mock summariser (/mutate, PR0) --------------------------------------

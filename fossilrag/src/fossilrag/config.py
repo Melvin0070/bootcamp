@@ -69,6 +69,11 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- Chunking --------------------------------------------------------
+    chunk_max_tokens: int = Field(default=256, ge=16)
+    chunk_overlap_tokens: int = Field(default=32, ge=0)
+    gold_format: str = "jsonl"  # jsonl | parquet
+
     # --- Vector search ---------------------------------------------------
     vector_table: str = "fossil_chunks"
     # pgvector HNSW query-time recall knob. Must be >= the largest top-k you
@@ -98,6 +103,21 @@ class Settings(BaseSettings):
             raise ValueError("pool_max_size must be positive")
         if v < min_size:
             raise ValueError(f"pool_max_size ({v}) must be >= pool_min_size ({min_size})")
+        return v
+
+    @field_validator("chunk_overlap_tokens")
+    @classmethod
+    def _overlap_lt_max(cls, v: int, info):  # noqa: ANN001
+        mx = info.data.get("chunk_max_tokens")
+        if mx is not None and v >= mx:
+            raise ValueError(f"chunk_overlap_tokens ({v}) must be < chunk_max_tokens ({mx})")
+        return v
+
+    @field_validator("gold_format")
+    @classmethod
+    def _gold_format_known(cls, v: str) -> str:
+        if v not in {"jsonl", "parquet"}:
+            raise ValueError(f"gold_format must be 'jsonl' or 'parquet' (got {v!r})")
         return v
 
     @field_validator("hnsw_ef_search")
