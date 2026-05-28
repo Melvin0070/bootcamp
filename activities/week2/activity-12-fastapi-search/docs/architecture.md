@@ -110,12 +110,17 @@ that fires exactly that payload and asserts the table survives.
   before any DB work — an empty query would otherwise scan the table.
 - **`limit` out of range** → 422 (`ge=1, le=100`); caps the worst-case
   result set.
-- **Pool not ready (startup race)** → 503, not a 500 crash; the LB
-  knows to wait, not to rotate the instance.
+- **Pool not ready** → 503, not a 500 crash. This is defense-in-depth:
+  in normal operation Uvicorn does not serve requests until lifespan
+  startup (`create_pool`) completes, and if `create_pool` raises the
+  app fails to start rather than serving 503s — so this branch is
+  mainly reached after shutdown (pool nulled) or in tests. The 503
+  (vs 500) still tells a load balancer "not ready, don't rotate".
 - **Pool unhealthy** → `/healthz` returns 500 so the LB rotates the
-  instance; distinct from the 503 "still warming up" case.
-- **Slow query** → `command_timeout=5s` cancels it; one bad request
-  can't hold a connection forever.
+  instance; distinct from the 503 "not ready" case.
+- **Slow query** → `command_timeout=5s` raises `asyncio.TimeoutError`
+  (aliased to the builtin `TimeoutError` on 3.11+), which the handler
+  maps to **504**; one bad request can't hold a connection forever.
 - **Sub-3-char query** → still correct (returns results) but falls
   back to a seq scan; documented, and the latency is acceptable
   because the result set is large anyway.

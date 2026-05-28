@@ -74,7 +74,14 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         if _POOL is not None:
-            await _POOL.close()
+            try:
+                await _POOL.close()
+            except Exception:
+                log.exception("event=pool_close_error")
+            # Null the singleton after close so _require_pool() returns
+            # 503 (not a stale handle whose .acquire() would fail) if the
+            # app is reused after shutdown (tests, reload).
+            _POOL = None
             log.info("event=shutdown_complete")
 
 
@@ -94,6 +101,12 @@ async def search(
     t0 = time.perf_counter()
     try:
         rows = await search_specimens(pool, q, limit)
+    except TimeoutError:
+        # asyncpg's command_timeout raises asyncio.TimeoutError (NOT a
+        # PostgresError), so it must be caught separately or it would
+        # escape as an unlogged 500. A timed-out upstream is a 504.
+        log.warning("event=search_timeout q=%r", q)
+        raise HTTPException(status_code=504, detail="search timed out") from None
     except asyncpg.exceptions.PostgresError:
         log.exception("event=search_db_error q=%r", q)
         raise HTTPException(status_code=500, detail="upstream db error") from None
@@ -111,9 +124,13 @@ async def search(
 @app.get("/healthz")
 async def healthz():
     if _POOL is None:
-        # Distinguish "still warming up" (LB should wait) from "pool
-        # broken" (LB should rotate). 503 vs 500.
-        raise HTTPException(status_code=503, detail="warming up")
+        # Defense-in-depth: in normal operation Uvicorn does not serve
+        # requests until lifespan startup (create_pool) completes, and if
+        # create_pool raises the app fails to start rather than serving
+        # 503s — so this branch is mainly reached after shutdown (pool
+        # nulled) or in tests. Returning 503 (not 500) still tells a load
+        # balancer "not ready, don't rotate" rather than "broken".
+        raise HTTPException(status_code=503, detail="pool not ready")
     try:
         ok = await healthcheck(_POOL)
     except Exception:

@@ -56,6 +56,17 @@ async def create_pool(dsn: str | None = None) -> asyncpg.Pool:
         # into every request handler the way the broken baseline did.
         raise RuntimeError("DATABASE_URL is not set")
 
+    # Validate the env-derived sizes up front with a clear message,
+    # rather than letting asyncpg raise a less obvious error deeper in.
+    if POOL_MIN_SIZE < 0 or POOL_MAX_SIZE <= 0:
+        raise ValueError(f"pool sizes must be positive (min={POOL_MIN_SIZE}, max={POOL_MAX_SIZE})")
+    if POOL_MIN_SIZE > POOL_MAX_SIZE:
+        raise ValueError(
+            f"POOL_MIN_SIZE ({POOL_MIN_SIZE}) cannot exceed POOL_MAX_SIZE ({POOL_MAX_SIZE})"
+        )
+    if COMMAND_TIMEOUT_SEC <= 0:
+        raise ValueError(f"COMMAND_TIMEOUT_SEC must be positive (got {COMMAND_TIMEOUT_SEC})")
+
     pool = await asyncpg.create_pool(
         dsn,
         min_size=POOL_MIN_SIZE,

@@ -20,6 +20,27 @@
 -- Expected: "Bitmap Index Scan on specimens_species_trgm_idx"
 -- in the plan. If you see "Seq Scan" the extension isn't installed
 -- or the index isn't built. See docs/explain-output.md.
+--
+-- ── PRODUCTION LOCK TRADE-OFF ─────────────────────────────────────────
+-- This file builds the index inside a transaction (BEGIN/COMMIT) with a
+-- plain CREATE INDEX. That takes an ACCESS EXCLUSIVE lock on `specimens`
+-- for the duration of the build, blocking writes (and index-using reads)
+-- while it runs. That is fine here — the table is created empty in the
+-- same migration, so the build is instant, and it keeps the file
+-- runnable as a single transactional unit (which the test fixture and a
+-- plain `psql -f` both rely on).
+--
+-- On a LIVE, already-populated `specimens` table, do NOT run this as-is.
+-- Build the index without a long write lock using CONCURRENTLY:
+--
+--   -- run OUTSIDE a transaction (CONCURRENTLY cannot run in BEGIN/COMMIT):
+--   CREATE EXTENSION IF NOT EXISTS pg_trgm;
+--   CREATE INDEX CONCURRENTLY IF NOT EXISTS specimens_species_trgm_idx
+--       ON specimens USING gin (species gin_trgm_ops);
+--
+-- CONCURRENTLY trades speed for availability: it scans the table twice
+-- and can leave an INVALID index if interrupted (drop and rebuild if so).
+-- ──────────────────────────────────────────────────────────────────────
 
 BEGIN;
 

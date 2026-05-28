@@ -57,10 +57,22 @@ class TestQueryShape:
 
 
 class TestPoolConfig:
-    def test_pool_has_bounded_size_defaults(self):
-        assert db.POOL_MAX_SIZE <= 20
-        assert db.POOL_MIN_SIZE >= 1
-        assert db.POOL_MIN_SIZE <= db.POOL_MAX_SIZE
+    def test_pool_size_defaults(self, monkeypatch):
+        """Assert the FALLBACK defaults (5/20), not the current process's
+        env-derived values — a developer who legitimately sets
+        POOL_MAX_SIZE per the runbook must not break this test. Clear the
+        env vars and reload db so the module-level constants re-evaluate."""
+        import importlib
+
+        for var in ("POOL_MIN_SIZE", "POOL_MAX_SIZE", "COMMAND_TIMEOUT_SEC"):
+            monkeypatch.delenv(var, raising=False)
+        reloaded = importlib.reload(db)
+        try:
+            assert reloaded.POOL_MIN_SIZE == 5
+            assert reloaded.POOL_MAX_SIZE == 20
+            assert reloaded.COMMAND_TIMEOUT_SEC == 5.0
+        finally:
+            importlib.reload(db)  # restore module state for other tests
 
     def test_command_timeout_is_set(self):
         assert db.COMMAND_TIMEOUT_SEC > 0
@@ -71,6 +83,26 @@ class TestPoolConfig:
 
         with pytest.raises(RuntimeError, match="DATABASE_URL is not set"):
             await db.create_pool(None)
+
+    async def test_create_pool_rejects_inverted_sizes(self, monkeypatch):
+        """min > max must fail loud with a clear message, before asyncpg."""
+        import importlib
+
+        import pytest
+
+        monkeypatch.setenv("POOL_MIN_SIZE", "30")
+        monkeypatch.setenv("POOL_MAX_SIZE", "10")
+        reloaded = importlib.reload(db)
+        try:
+            with pytest.raises(ValueError, match="cannot exceed"):
+                await reloaded.create_pool("postgresql://x/y")
+        finally:
+            # Clear the bad env BEFORE reloading so db's module constants
+            # are restored to defaults (monkeypatch undoes env only after
+            # the test returns, which is too late for the reload here).
+            for var in ("POOL_MIN_SIZE", "POOL_MAX_SIZE"):
+                monkeypatch.delenv(var, raising=False)
+            importlib.reload(db)
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +169,23 @@ class TestErrorBranches:
         client = TestClient(app_module.app, raise_server_exceptions=False)
         resp = client.get("/search?q=trex&limit=5")
         assert resp.status_code == 500
+
+    def test_search_timeout_returns_504(self, monkeypatch):
+        """asyncpg's command_timeout raises asyncio.TimeoutError, which is
+        NOT a PostgresError — the handler must map it to 504, not let it
+        escape as an unlogged 500."""
+
+        import app as app_module
+
+        app_module._POOL = object()
+
+        async def slow(*_a, **_k):
+            raise TimeoutError("simulated command timeout")
+
+        monkeypatch.setattr(app_module, "search_specimens", slow)
+        client = TestClient(app_module.app, raise_server_exceptions=False)
+        resp = client.get("/search?q=trex&limit=5")
+        assert resp.status_code == 504
 
     def test_healthz_unhealthy_pool_returns_500(self, monkeypatch):
         import app as app_module

@@ -51,9 +51,9 @@ traffic**. Three root causes, all in `broken/app.py`:
 | 3 | No index → `ILIKE '%q%'` sequential scan (~400 ms) | `pg_trgm` GIN index → `Bitmap Index Scan` (sub-ms); see `migrations/0001_search_index.sql` |
 | 4 | f-string SQL interpolation (injection) | Parameterised `$1/$2`; wildcards live in the bound value, not the SQL text |
 | 5 | No request validation | `Query(min_length=1, max_length=128)`, `limit ge=1 le=100` → 422 before any DB work |
-| 6 | No query timeout — one slow query hangs the worker | `command_timeout=5s` on the pool |
-| 7 | `/healthz` opened a fresh connection (outage amplification) | `SELECT 1` on a pooled connection; 503 "warming up" vs 500 "unhealthy" |
-| 8 | DSN re-read inline per request, bad DSN leaked to logs | `create_pool` validates `DATABASE_URL` once, fails loud at startup |
+| 6 | No query timeout — one slow query hangs the worker | `command_timeout=5s` on the pool; the handler catches the resulting `asyncio.TimeoutError` and returns **504** (it is not a `PostgresError`, so it needs its own except) |
+| 7 | `/healthz` opened a fresh connection (outage amplification) | `SELECT 1` on a pooled connection; 503 "not ready" vs 500 "unhealthy" |
+| 8 | DSN re-read inline per request, bad DSN leaked to logs | `create_pool` validates `DATABASE_URL` + pool sizes once, fails loud at startup |
 | 9 | pg_trgm `%` similarity operator would silently drop short-query matches (threshold 0.3) | Indexed `ILIKE` substring — exact containment semantics, still index-accelerated |
 
 ## Performance (load test, 500 k-row table)
