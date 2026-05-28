@@ -75,6 +75,18 @@ class Settings(BaseSettings):
     # serve; higher = better recall, slower. See pgvector 0.8 docs.
     hnsw_ef_search: int = 100
 
+    # --- Ingestion / AWS -------------------------------------------------
+    aws_region: str = "us-east-1"
+    # Override the AWS endpoint for LocalStack, e.g. http://localhost:4566.
+    # Read unprefixed too, since boto3 honours AWS_ENDPOINT_URL natively.
+    aws_endpoint_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("FOSSILRAG_AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL"),
+    )
+    raw_bucket: str | None = None
+    silver_bucket: str | None = None
+    silver_prefix: str = "silver"
+
     # --- Service ---------------------------------------------------------
     log_level: str = "INFO"
     service_name: str = "fossilrag"

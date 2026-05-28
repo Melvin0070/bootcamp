@@ -45,6 +45,12 @@ dev = [
     "httpx>=0.28",
     "moto[s3,dynamodb,sqs]>=5.0",
     "ruff>=0.15",
+    # Extraction libs are part of the tested surface from PR1, so the default
+    # `.[dev]` install (used by CI) exercises them; fpdf2 generates PDF test
+    # fixtures in-process (no committed binaries).
+    "pypdf>=6.0",
+    "python-pptx>=1.0.2",
+    "fpdf2>=2.8",
 ]
 
 [tool.hatch.build.targets.wheel]
