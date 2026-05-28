@@ -19,6 +19,17 @@ SYSTEM_PROMPT = (
     "context is insufficient, say so. Be concise and factual."
 )
 
+EDIT_SYSTEM_PROMPT = (
+    "You are FossilRAG's slide editor. Apply the user's instruction to the slide "
+    "text and return ONLY the revised slide text — no preamble, no explanation."
+)
+
+
+def build_edit_prompt(text: str, instruction: str) -> tuple[str, str]:
+    """Return ``(system, user)`` for an editing instruction over slide text."""
+    user = f"Instruction: {instruction}\n\nSlide text to revise:\n{text}"
+    return EDIT_SYSTEM_PROMPT, user
+
 
 @dataclass(frozen=True)
 class LLMResult:
@@ -68,4 +79,8 @@ class LLMProvider(Protocol):
 
     def chat(self, *, messages: list[ChatMessage], hits: list[ExcavateHit]) -> LLMResult:
         """Answer the latest user turn, grounded in ``hits``, given the dialogue."""
+        ...
+
+    def edit(self, *, text: str, instruction: str) -> LLMResult:
+        """Apply an editing instruction to ``text``; return the revised text."""
         ...

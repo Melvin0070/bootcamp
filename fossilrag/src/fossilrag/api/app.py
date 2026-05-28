@@ -36,11 +36,12 @@ from fossilrag.models import (
     FossilDiffResponse,
     IngestResult,
     MutateResponse,
+    SlideMutateResponse,
     TimeTravelResponse,
 )
 from fossilrag.mutate import MOCK_NOTE
 from fossilrag.pipeline import ingest_document
-from fossilrag.timetravel import unified_fossil_diff
+from fossilrag.timetravel import unified_fossil_diff, unified_text_diff
 from fossilrag.vectorstore import make_vector_store
 from fossilrag.vectorstore.base import VectorStore
 
@@ -144,6 +145,14 @@ class ChatRequest(BaseModel):
     source_id: str | None = Field(default=None, max_length=512)
 
 
+class SlideMutateRequest(BaseModel):
+    text: str = Field(min_length=1, description="Slide text to revise.")
+    instruction: str = Field(min_length=1, max_length=512)
+    # When source_id + persist, the suggestion is saved as a new fossil layer.
+    source_id: str | None = Field(default=None, max_length=512)
+    persist: bool = False
+
+
 # -- endpoints ------------------------------------------------------------
 
 
@@ -164,6 +173,7 @@ async def root(settings: Settings = Depends(settings_dep)) -> dict:
             "/enrich",
             "/markers",
             "/chat",
+            "/slide/mutate",
             "/healthz",
         ],
     }
@@ -465,4 +475,84 @@ async def chat(
         cached=cached,
         citations=hits,
         latency_ms=latency_ms,
+    )
+
+
+@app.post("/slide/mutate", response_model=SlideMutateResponse)
+async def slide_mutate(
+    req: SlideMutateRequest,
+    store: VectorStore = Depends(get_store),
+    embedder: Embedder = Depends(get_embedder),
+    llm: LLMProvider = Depends(get_llm),
+    cache: PromptCache = Depends(get_prompt_cache),
+) -> SlideMutateResponse:
+    """PowerPoint Slide Mutator: propose an edit + show the diff, with versioning.
+
+    Composes the LLM (edit), Fossil Diff (original vs suggestion), and — when
+    ``persist`` + ``source_id`` are given — version tracking by saving the
+    suggestion as a new fossil layer (then visible via ``/timetravel`` & ``/diff``).
+    """
+    is_mock = llm.model_id.startswith("mock")
+    key = fossil_key(llm.model_id, req.text, f"edit:{req.instruction}", [])
+    try:
+        cached_suggestion = cache.get(key)
+    except Exception:
+        log.warning("event=slide_cache_get_failed")
+        cached_suggestion = None
+    if cached_suggestion is not None:
+        suggestion, cached = cached_suggestion, True
+    else:
+        try:
+            result = llm.edit(text=req.text, instruction=req.instruction)
+        except Exception:
+            log.exception("event=slide_mutate_llm_failed model=%s", llm.model_id)
+            raise HTTPException(status_code=502, detail="LLM provider error") from None
+        suggestion, cached = result.text, False
+        with contextlib.suppress(Exception):
+            cache.put(key, suggestion)
+
+    diff = unified_text_diff(
+        req.text.splitlines(),
+        suggestion.splitlines(),
+        from_label="original",
+        to_label="suggestion",
+    )
+
+    persisted_version: int | None = None
+    if req.persist and req.source_id:
+        latest = await store.latest_layer(req.source_id)
+        version = (latest or 0) + 1
+        result = await ingest_document(
+            store=store,
+            embedder=embedder,
+            filename=req.source_id,
+            data=suggestion.encode("utf-8"),
+            source_id=req.source_id,
+            layer_version=version,
+        )
+        # Only advertise a version if something was actually indexed — an empty
+        # suggestion produces zero chunks and must NOT report a phantom layer.
+        persisted_version = version if result.chunks_indexed > 0 else None
+
+    log.info(
+        "event=slide_mutate source_id=%s changed=%s persisted=%s model=%s cached=%s",
+        req.source_id,
+        diff.changed,
+        persisted_version,
+        llm.model_id,
+        cached,
+    )
+    return SlideMutateResponse(
+        source_id=req.source_id,
+        instruction=req.instruction,
+        original=req.text,
+        suggestion=suggestion,
+        model_id=llm.model_id,
+        mock=is_mock,
+        cached=cached,
+        changed=diff.changed,
+        added_lines=diff.added_lines,
+        removed_lines=diff.removed_lines,
+        unified_diff=diff.unified_diff,
+        persisted_version=persisted_version,
     )

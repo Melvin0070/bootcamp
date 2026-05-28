@@ -120,12 +120,14 @@ class PgVectorStore:
                 metadata       jsonb NOT NULL DEFAULT '{{}}'::jsonb,
                 ingested_at    timestamptz NOT NULL DEFAULT now(),
                 embedding      vector({self._dim}) NOT NULL,
-                -- Composite key enforces (model_id, dim) provenance isolation:
-                -- the same content-addressed chunk can coexist as separate
-                -- fossils under different embedding models (e.g. mock vs local,
-                -- both 384-dim yet incomparable vector spaces) without one
-                -- overwriting the other. search() filters to a single space.
-                PRIMARY KEY (chunk_id, model_id, embed_dim)
+                -- Composite key: (model_id, dim) gives provenance isolation —
+                -- the same content-addressed chunk coexists under different
+                -- models (mock vs local, both 384-dim yet incomparable) without
+                -- overwriting; layer_version lets the SAME content live as two
+                -- distinct fossil layers (a re-persisted/identical version isn't
+                -- relabelled onto an existing layer). Re-ingesting the SAME
+                -- (content, model, version) still dedups in place — idempotent.
+                PRIMARY KEY (chunk_id, model_id, embed_dim, layer_version)
             );
         """
         doc_idx = f"CREATE INDEX IF NOT EXISTS {self._table}_doc_id_idx ON {self._table} (doc_id);"
@@ -224,10 +226,9 @@ class PgVectorStore:
                 (chunk_id, doc_id, ordinal, content, layer_version, geological_age,
                  model_id, embed_dim, metadata, ingested_at, embedding, source_id)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12)
-            ON CONFLICT (chunk_id, model_id, embed_dim) DO UPDATE SET
+            ON CONFLICT (chunk_id, model_id, embed_dim, layer_version) DO UPDATE SET
                 content        = EXCLUDED.content,
                 source_id      = EXCLUDED.source_id,
-                layer_version  = EXCLUDED.layer_version,
                 geological_age = EXCLUDED.geological_age,
                 metadata       = EXCLUDED.metadata,
                 ingested_at    = EXCLUDED.ingested_at,

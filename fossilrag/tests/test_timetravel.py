@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fossilrag.models import FossilLayerChunk
-from fossilrag.timetravel import unified_fossil_diff
+from fossilrag.timetravel import unified_fossil_diff, unified_text_diff
 
 
 def _layer(contents: list[str], version: int) -> list[FossilLayerChunk]:
@@ -30,6 +30,14 @@ def test_unified_fossil_diff_detects_changes():
     assert "v1" in d.unified_diff and "v2" in d.unified_diff
     assert "+delta" in d.unified_diff
     assert "-beta" in d.unified_diff
+
+
+def test_unified_text_diff():
+    d = unified_text_diff(["a", "b", "c"], ["a", "B", "c", "d"], from_label="orig", to_label="new")
+    assert d.changed and d.added_lines >= 1 and d.removed_lines >= 1
+    assert "orig" in d.unified_diff and "new" in d.unified_diff
+    same = unified_text_diff(["x"], ["x"], from_label="o", to_label="n")
+    assert same.changed is False and same.unified_diff == ""
 
 
 def test_unified_fossil_diff_identical_layers_no_change():

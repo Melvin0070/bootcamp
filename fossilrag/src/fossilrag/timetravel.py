@@ -22,27 +22,18 @@ class DiffResult:
     changed: bool
 
 
-def unified_fossil_diff(
-    from_version: int,
-    to_version: int,
-    from_chunks: list[FossilLayerChunk],
-    to_chunks: list[FossilLayerChunk],
+def unified_text_diff(
+    from_lines: list[str], to_lines: list[str], *, from_label: str, to_label: str
 ) -> DiffResult:
-    """Unified diff of two layers' chunk contents (one chunk per diff line)."""
-    from_lines = [c.content for c in from_chunks]
-    to_lines = [c.content for c in to_chunks]
+    """Unified diff over two line lists, with added/removed counts."""
     diff_lines = list(
         difflib.unified_diff(
-            from_lines,
-            to_lines,
-            fromfile=f"v{from_version}",
-            tofile=f"v{to_version}",
-            lineterm="",
+            from_lines, to_lines, fromfile=from_label, tofile=to_label, lineterm=""
         )
     )
-    # Exclude difflib's "+++"/"---" file headers from the change counts. (A
-    # chunk whose content literally starts with "++"/"--" would be miscounted,
-    # but never appears in the diff text itself — cleaned prose, effectively
+    # Exclude difflib's "+++"/"---" file headers from the change counts. (A line
+    # whose content literally starts with "++"/"--" would be miscounted, but
+    # never appears in the diff text itself — cleaned prose, effectively
     # unreachable.)
     added = sum(1 for ln in diff_lines if ln.startswith("+") and not ln.startswith("+++"))
     removed = sum(1 for ln in diff_lines if ln.startswith("-") and not ln.startswith("---"))
@@ -51,4 +42,19 @@ def unified_fossil_diff(
         added_lines=added,
         removed_lines=removed,
         changed=bool(added or removed),
+    )
+
+
+def unified_fossil_diff(
+    from_version: int,
+    to_version: int,
+    from_chunks: list[FossilLayerChunk],
+    to_chunks: list[FossilLayerChunk],
+) -> DiffResult:
+    """Unified diff of two layers' chunk contents (one chunk per diff line)."""
+    return unified_text_diff(
+        [c.content for c in from_chunks],
+        [c.content for c in to_chunks],
+        from_label=f"v{from_version}",
+        to_label=f"v{to_version}",
     )

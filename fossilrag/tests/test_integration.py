@@ -133,6 +133,50 @@ async def test_provenance_isolation_same_dim():
         await store_b.close()
 
 
+async def test_same_content_distinct_layers_coexist():
+    """Identical content at two layer versions must coexist (not relabel/destroy)."""
+    from fossilrag.config import Settings
+    from fossilrag.embedding.mock import MockEmbedder
+    from fossilrag.models import Chunk, compute_chunk_id, geological_age_for
+    from fossilrag.vectorstore.pgvector import PgVectorStore
+
+    table = "test_fossils_" + uuid.uuid4().hex[:8]
+    settings = Settings(embed_model="m", embed_dim=16, vector_table=table)
+    emb = MockEmbedder("m", 16)
+    texts = ["alpha", "beta"]
+
+    def layer(v):  # noqa: ANN001
+        return [
+            Chunk(
+                chunk_id=compute_chunk_id("doc", i, t),  # identical across layers
+                doc_id="doc",
+                source_id="src",
+                ordinal=i,
+                content=t,
+                char_count=len(t),
+                layer_version=v,
+                geological_age=geological_age_for(v),
+            )
+            for i, t in enumerate(texts)
+        ]
+
+    store = await PgVectorStore.connect(settings)
+    try:
+        await store.bootstrap()
+        v1, v2 = layer(1), layer(2)
+        assert v1[0].chunk_id == v2[0].chunk_id  # same content → same chunk_id
+        await store.upsert_chunks(v1, emb.encode(texts))
+        await store.upsert_chunks(v2, emb.encode(texts))
+        assert await store.list_layers("src") == [1, 2]  # both layers present
+        assert len(await store.get_layer("src", 1)) == 2
+        assert len(await store.get_layer("src", 2)) == 2
+        assert await store.count() == 4  # 2 chunks × 2 layers (no relabel/clobber)
+    finally:
+        async with store._pool.acquire() as conn:
+            await conn.execute(f"DROP TABLE IF EXISTS {table}")
+        await store.close()
+
+
 def test_excavate_endpoint_e2e():
     """Full HTTP spine through the FastAPI app, including top-k ranking.
 
@@ -336,3 +380,70 @@ def test_chat_e2e():
         ex = client.get("/excavate", params={"q": "plates", "k": 5, "source_id": "chatdoc"})
         assert ex.status_code == 200
         assert ex.json()["hits"] and all(h["source_id"] == "chatdoc" for h in ex.json()["hits"])
+
+
+def test_slide_mutate_e2e():
+    """PPTX Slide Mutator: edit suggestion + diff + version tracking."""
+    from fastapi.testclient import TestClient
+
+    from fossilrag.api.app import app
+
+    sid = "deck-pr8"
+    original = (
+        "Our Q3 results were strong. Revenue grew twenty percent. "
+        "Costs fell sharply. The outlook is positive. The team expanded."
+    )
+    with TestClient(app) as client:
+        client.post(
+            "/ingest",
+            json={"filename": "slide.txt", "text": original, "source_id": sid, "layer_version": 1},
+        ).raise_for_status()
+
+        r = client.post(
+            "/slide/mutate",
+            json={
+                "text": original,
+                "instruction": "make this slide more concise",
+                "source_id": sid,
+                "persist": True,
+            },
+        )
+        assert r.status_code == 200, r.text
+        j = r.json()
+        assert j["mock"] is True and j["cached"] is False
+        assert j["changed"] is True and j["suggestion"] != original
+        assert j["unified_diff"]
+        assert j["persisted_version"] == 2  # saved as a new fossil layer
+
+        # The mutation is now an addressable layer (version tracking).
+        tt = client.get("/timetravel", params={"source_id": sid}).json()
+        assert tt["latest_version"] == 2 and 2 in tt["available_versions"]
+
+        # Prompt Fossilization: same text+instruction → cache hit (persist irrelevant).
+        again = client.post(
+            "/slide/mutate",
+            json={"text": original, "instruction": "make this slide more concise"},
+        )
+        assert again.json()["cached"] is True
+
+        # Re-persisting the identical suggestion creates a NEW layer (v3) — it
+        # must not relabel/destroy v2 (Finding-1 regression).
+        r3 = client.post(
+            "/slide/mutate",
+            json={
+                "text": original,
+                "instruction": "make this slide more concise",
+                "source_id": sid,
+                "persist": True,
+            },
+        )
+        assert r3.json()["persisted_version"] == 3
+        versions = client.get("/timetravel", params={"source_id": sid}).json()["available_versions"]
+        assert 2 in versions and 3 in versions  # both coexist
+
+        # An all-whitespace slide indexes nothing → no phantom version (Finding 2).
+        blank = client.post(
+            "/slide/mutate",
+            json={"text": "   ", "instruction": "shorten", "source_id": sid, "persist": True},
+        )
+        assert blank.json()["persisted_version"] is None
