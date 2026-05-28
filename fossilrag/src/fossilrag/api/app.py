@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from fossilrag import __version__
 from fossilrag.config import Settings, get_settings
+from fossilrag.dataset import build_pairs, to_jsonl
 from fossilrag.embedding import make_embedder
 from fossilrag.embedding.base import Embedder
 from fossilrag.enrichment import extract_markers
@@ -31,6 +32,7 @@ from fossilrag.logging import configure_logging, get_logger
 from fossilrag.models import (
     ChatMessage,
     ChatResponse,
+    DatasetResponse,
     EnrichmentRecord,
     ExcavateResponse,
     FossilDiffResponse,
@@ -153,6 +155,13 @@ class SlideMutateRequest(BaseModel):
     persist: bool = False
 
 
+class DatasetRequest(BaseModel):
+    source_id: str = Field(min_length=1)
+    version: int | None = Field(default=None, ge=1)  # default: latest layer
+    fmt: str = "chat"  # chat | alpaca
+    templates: list[str] | None = None  # subset of dataset.TEMPLATES keys
+
+
 # -- endpoints ------------------------------------------------------------
 
 
@@ -174,6 +183,7 @@ async def root(settings: Settings = Depends(settings_dep)) -> dict:
             "/markers",
             "/chat",
             "/slide/mutate",
+            "/dataset",
             "/healthz",
         ],
     }
@@ -555,4 +565,39 @@ async def slide_mutate(
         removed_lines=diff.removed_lines,
         unified_diff=diff.unified_diff,
         persisted_version=persisted_version,
+    )
+
+
+@app.post("/dataset", response_model=DatasetResponse)
+async def dataset(
+    req: DatasetRequest,
+    store: VectorStore = Depends(get_store),
+) -> DatasetResponse:
+    """Fine-Tuning Dataset Builder: JSONL instruction/response pairs from fossils."""
+    version = req.version
+    if version is None:
+        version = await store.latest_layer(req.source_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail=f"no fossil layers for {req.source_id!r}")
+    chunks = await store.get_layer(req.source_id, version)
+    if not chunks:
+        raise HTTPException(status_code=404, detail=f"layer v{version} not found")
+    try:
+        records = build_pairs(chunks, fmt=req.fmt, templates=req.templates)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    log.info(
+        "event=dataset_built source_id=%s version=%d fmt=%s records=%d",
+        req.source_id,
+        version,
+        req.fmt,
+        len(records),
+    )
+    return DatasetResponse(
+        source_id=req.source_id,
+        version=version,
+        format=req.fmt,
+        count=len(records),
+        records=records,
+        jsonl=to_jsonl(records),
     )
