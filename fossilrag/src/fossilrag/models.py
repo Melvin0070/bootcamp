@@ -218,3 +218,21 @@ class FossilDiffResponse(BaseModel):
     added_lines: int
     removed_lines: int
     unified_diff: str
+
+
+class Marker(BaseModel):
+    """A structured marker extracted from a document (Automated Enrichment)."""
+
+    kind: str  # date | metric | error_code
+    text: str
+    value: str | None = None
+
+
+class EnrichmentRecord(BaseModel):
+    """A document layer's extracted markers — the structured enrichment record."""
+
+    source_id: str
+    doc_id: str
+    layer_version: int
+    markers: list[Marker]
+    counts: dict[str, int]

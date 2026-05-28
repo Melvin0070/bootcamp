@@ -12,7 +12,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
-from fossilrag.models import Chunk, ExcavateHit, FossilLayerChunk
+from fossilrag.models import Chunk, EnrichmentRecord, ExcavateHit, FossilLayerChunk, Marker
 
 
 @runtime_checkable
@@ -44,6 +44,16 @@ class VectorStore(Protocol):
 
     async def get_layer(self, source_id: str, layer_version: int) -> list[FossilLayerChunk]:
         """All chunks of one fossil layer, in document order (no embedding)."""
+        ...
+
+    async def store_markers(
+        self, *, doc_id: str, source_id: str, layer_version: int, markers: list[Marker]
+    ) -> EnrichmentRecord:
+        """Persist a layer's extracted markers (Automated Enrichment)."""
+        ...
+
+    async def get_markers(self, source_id: str, layer_version: int) -> EnrichmentRecord | None:
+        """Fetch a layer's stored enrichment record, or None."""
         ...
 
     async def healthcheck(self) -> bool:

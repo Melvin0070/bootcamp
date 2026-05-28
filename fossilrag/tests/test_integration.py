@@ -266,3 +266,30 @@ def test_timetravel_and_diff_e2e():
             ).status_code
             == 404
         )
+
+
+def test_enrich_and_markers_e2e():
+    """Automated Enrichment over HTTP: extract markers, persist, retrieve."""
+    from fastapi.testclient import TestClient
+
+    from fossilrag.api.app import app
+
+    sid = "logs-enrich"
+    log = "2026-05-29 ERROR HTTP 503 after 1200ms; retries=3. Raised ConnectionError. ERR-4521."
+    with TestClient(app) as client:
+        r = client.post(
+            "/enrich",
+            json={"filename": "app.log", "text": log, "source_id": sid, "layer_version": 1},
+        )
+        assert r.status_code == 200, r.text
+        rec = r.json()
+        assert rec["source_id"] == sid and rec["layer_version"] == 1
+        assert rec["counts"].get("error_code", 0) >= 2
+        texts = {m["text"] for m in rec["markers"]}
+        assert "2026-05-29" in texts and "ERR-4521" in texts and "1200ms" in texts
+
+        got = client.get("/markers", params={"source_id": sid, "version": 1})
+        assert got.status_code == 200
+        assert got.json()["counts"] == rec["counts"]
+
+        assert client.get("/markers", params={"source_id": "nope", "version": 1}).status_code == 404

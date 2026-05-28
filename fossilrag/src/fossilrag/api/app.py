@@ -21,11 +21,14 @@ from fossilrag import __version__
 from fossilrag.config import Settings, get_settings
 from fossilrag.embedding import make_embedder
 from fossilrag.embedding.base import Embedder
+from fossilrag.enrichment import extract_markers
+from fossilrag.ingest import extract_document
 from fossilrag.llm import fossil_key, make_llm, make_prompt_cache
 from fossilrag.llm.base import LLMProvider
 from fossilrag.llm.cache import PromptCache
 from fossilrag.logging import configure_logging, get_logger
 from fossilrag.models import (
+    EnrichmentRecord,
     ExcavateResponse,
     FossilDiffResponse,
     IngestResult,
@@ -142,7 +145,16 @@ async def root(settings: Settings = Depends(settings_dep)) -> dict:
         "embed_model": settings.embed_model,
         "embed_dim": settings.embed_dim,
         "vector_backend": "pgvector",
-        "endpoints": ["/excavate", "/ingest", "/mutate", "/timetravel", "/diff", "/healthz"],
+        "endpoints": [
+            "/excavate",
+            "/ingest",
+            "/mutate",
+            "/timetravel",
+            "/diff",
+            "/enrich",
+            "/markers",
+            "/healthz",
+        ],
     }
 
 
@@ -326,3 +338,53 @@ async def diff(
         removed_lines=result.removed_lines,
         unified_diff=result.unified_diff,
     )
+
+
+@app.post("/enrich", response_model=EnrichmentRecord)
+async def enrich(
+    req: IngestRequest,
+    store: VectorStore = Depends(get_store),
+) -> EnrichmentRecord:
+    """Extract structured markers (dates/metrics/error codes) and persist them.
+
+    Automated Enrichment (use case #3): the markers become a fossil-layer-
+    versioned structured record, retrievable via ``/markers``.
+    """
+    try:
+        doc = extract_document(
+            filename=req.filename,
+            data=req.text.encode("utf-8"),
+            content_type=req.content_type,
+            source_id=req.source_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    markers = extract_markers(doc.text)
+    record = await store.store_markers(
+        doc_id=doc.doc_id,
+        source_id=doc.source_id,
+        layer_version=req.layer_version,
+        markers=markers,
+    )
+    log.info(
+        "event=enrich source_id=%s layer=%d markers=%d",
+        doc.source_id,
+        req.layer_version,
+        len(markers),
+    )
+    return record
+
+
+@app.get("/markers", response_model=EnrichmentRecord)
+async def markers(
+    source_id: str = Query(..., min_length=1),
+    version: int = Query(1, ge=1),
+    store: VectorStore = Depends(get_store),
+) -> EnrichmentRecord:
+    """Return the stored enrichment record for a document layer."""
+    record = await store.get_markers(source_id, version)
+    if record is None:
+        raise HTTPException(
+            status_code=404, detail=f"no enrichment for source_id {source_id!r} v{version}"
+        )
+    return record
