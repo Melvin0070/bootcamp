@@ -189,6 +189,16 @@ def test_settings_reject_bad_ef_search():
         Settings(hnsw_ef_search=0)
 
 
+def test_settings_reject_negative_pool_min():
+    with pytest.raises(ValidationError):
+        Settings(pool_min_size=-1)
+
+
+def test_settings_reject_nonpositive_timeout():
+    with pytest.raises(ValidationError):
+        Settings(command_timeout_sec=0)
+
+
 def test_settings_defaults():
     s = Settings()
     assert s.embed_provider == "mock"

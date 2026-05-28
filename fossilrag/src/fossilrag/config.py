@@ -35,9 +35,9 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("FOSSILRAG_DATABASE_URL", "DATABASE_URL"),
         description="asyncpg DSN for the Postgres+pgvector store.",
     )
-    pool_min_size: int = 2
+    pool_min_size: int = Field(default=2, ge=0)
     pool_max_size: int = 10
-    command_timeout_sec: float = 10.0
+    command_timeout_sec: float = Field(default=10.0, gt=0)
 
     # --- Embeddings ------------------------------------------------------
     # The active provider fixes the vector space. Indexes are keyed by
@@ -83,7 +83,6 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("FOSSILRAG_AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL"),
     )
-    raw_bucket: str | None = None
     silver_bucket: str | None = None
     silver_prefix: str = "silver"
 

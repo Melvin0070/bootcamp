@@ -5,9 +5,10 @@ PR11). For each event record it reads the raw object, extracts text +
 provenance, and writes the silver-layer JSON. Extraction is content-addressed,
 so redelivered events are idempotent.
 
-Per-record failures are collected and, if any occurred, re-raised at the end so
-the platform retries the invocation and (PR10) routes exhausted retries to the
-DLQ — rather than silently dropping a document.
+Per-record *extraction* failures are collected and, if any occurred, re-raised
+at the end so the platform retries the invocation and (PR10) routes exhausted
+retries to the DLQ. Structurally malformed event records (no bucket/key — not a
+document) are logged and skipped, since retrying them can never succeed.
 """
 
 from __future__ import annotations
@@ -52,7 +53,12 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
         try:
             data, content_type = read_object(src_bucket, key, client=s3)
             doc = extract_document(
-                filename=key.rsplit("/", 1)[-1],
+                # Use the FULL key (not just the basename) so doc_id is
+                # path-aware: two objects with the same basename + identical
+                # content under different prefixes stay distinct fossils with
+                # correct provenance (their own source_uri), instead of
+                # colliding onto one silver object.
+                filename=key,
                 data=data,
                 content_type=content_type,
                 source_uri=f"s3://{src_bucket}/{key}",

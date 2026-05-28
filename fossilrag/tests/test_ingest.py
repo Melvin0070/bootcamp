@@ -20,6 +20,10 @@ from fossilrag.ingest.storage import silver_key
 PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 
+def _s3_event(bucket: str, key: str) -> dict:
+    return {"Records": [{"s3": {"bucket": {"name": bucket}, "object": {"key": key}}}]}
+
+
 # --- content-type resolution / dispatch ----------------------------------
 
 
@@ -59,6 +63,16 @@ def test_extract_pdf():
     doc = extract_document(filename="trex.pdf", data=data, content_type="application/pdf")
     assert doc.metadata["extractor"] == "pdf"
     assert "Tyrannosaurus" in doc.text
+
+
+def test_extract_corrupt_pdf_raises_valueerror():
+    # A supported type with a bad body must surface as ValueError (→ clean 4xx /
+    # non-retryable), not an opaque library error.
+    pytest.importorskip("pypdf")
+    with pytest.raises(ValueError):
+        extract_document(
+            filename="bad.pdf", data=b"not really a pdf", content_type="application/pdf"
+        )
 
 
 # --- PPTX (fixture generated with python-pptx) ----------------------------
@@ -144,6 +158,36 @@ def test_handler_extracts_raw_to_silver():
             # CRLF normalised; provenance recorded.
             assert silver["text"] == "First para.\n\nSecond para."
             assert silver["source_uri"] == "s3://raw-bucket/docs/my report.txt"
+        finally:
+            restore()
+
+
+def test_handler_full_key_prevents_basename_collision():
+    """Same basename + identical content under different prefixes → distinct fossils."""
+    pytest.importorskip("moto")
+    boto3 = pytest.importorskip("boto3")
+    from moto import mock_aws
+
+    from fossilrag.ingest.handler import handler
+
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="raw-bucket")
+        s3.create_bucket(Bucket="silver-bucket")
+        body = b"Identical content under two prefixes."
+        s3.put_object(
+            Bucket="raw-bucket", Key="2024/report.txt", Body=body, ContentType="text/plain"
+        )
+        s3.put_object(
+            Bucket="raw-bucket", Key="2025/report.txt", Body=body, ContentType="text/plain"
+        )
+        restore = _silver_env("silver-bucket")
+        try:
+            d1 = handler(_s3_event("raw-bucket", "2024/report.txt"))["processed"][0]["doc_id"]
+            d2 = handler(_s3_event("raw-bucket", "2025/report.txt"))["processed"][0]["doc_id"]
+            assert d1 != d2  # full-key identity, not basename — no collision
+            keys = {o["Key"] for o in s3.list_objects_v2(Bucket="silver-bucket")["Contents"]}
+            assert silver_key(d1) in keys and silver_key(d2) in keys
         finally:
             restore()
 

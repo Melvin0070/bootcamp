@@ -89,7 +89,12 @@ def _extract_pdf(data: bytes) -> str:
 
 
 def _extract_pptx(data: bytes) -> str:
-    """Extract text from a PPTX: every shape's text frame, slide by slide."""
+    """Extract text from a PPTX: every shape's text frame, slide by slide.
+
+    PR1 covers text-frame shapes (titles, bodies, text boxes). Table cells,
+    grouped shapes, and chart text are deepened with the Slide Mutator (PR8),
+    which needs structured slide content.
+    """
     from pptx import Presentation  # lazy: optional 'extract' dependency
 
     prs = Presentation(io.BytesIO(data))
@@ -128,7 +133,16 @@ def extract_document(
     """
     ctype = _resolve_content_type(filename, content_type)
     tag = SUPPORTED_CONTENT_TYPES[ctype]
-    text = _EXTRACTORS[tag](data)
+    try:
+        text = _EXTRACTORS[tag](data)
+    except Exception as exc:  # noqa: BLE001 — normalise parse failures to ValueError
+        # A *supported* type with a corrupt/mismatched body (truncated PDF,
+        # non-zip .pptx, ...) raises library-specific errors (pypdf's
+        # PdfReadError, python-pptx's PackageNotFoundError) that don't subclass
+        # ValueError. Normalise so callers map it to a clean 4xx and the
+        # ingestion Lambda treats it as a non-retryable bad object — not an
+        # opaque 500 / endless retry.
+        raise ValueError(f"failed to extract {ctype} from {filename!r}: {exc}") from exc
 
     doc = RawDocument.from_text(
         filename=filename,
@@ -138,6 +152,15 @@ def extract_document(
         source_uri=source_uri,
         metadata={"extractor": tag, "bytes": str(len(data))},
     )
+    if doc.char_count == 0:
+        # e.g. a scanned/image-only PDF — surface it so empty ingests aren't
+        # silently invisible downstream (chunking would produce nothing).
+        log.warning(
+            "event=document_empty doc_id=%s filename=%s extractor=%s",
+            doc.doc_id[:12],
+            filename,
+            tag,
+        )
     log.info(
         "event=document_extracted doc_id=%s filename=%s content_type=%s extractor=%s chars=%d",
         doc.doc_id[:12],
