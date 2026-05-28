@@ -1,0 +1,228 @@
+"""LLM providers (injected fakes, $0) + Prompt Fossilization cache."""
+
+from __future__ import annotations
+
+import pytest
+
+from fossilrag.config import Settings
+from fossilrag.llm import fossil_key, make_llm, make_prompt_cache
+from fossilrag.llm.base import SYSTEM_PROMPT, build_prompt
+from fossilrag.llm.bedrock import DEFAULT_MODEL as BEDROCK_MODEL
+from fossilrag.llm.bedrock import BedrockLLM
+from fossilrag.llm.cache import (
+    DynamoDBPromptCache,
+    InMemoryPromptCache,
+    LocalFilePromptCache,
+)
+from fossilrag.llm.mock import MockLLM
+from fossilrag.models import ExcavateHit
+
+
+def _hit(content: str, cid: str = "c1") -> ExcavateHit:
+    return ExcavateHit(
+        chunk_id=cid,
+        doc_id="d",
+        ordinal=0,
+        content=content,
+        score=0.9,
+        layer_version=1,
+        geological_age="Holocene",
+    )
+
+
+# --- prompt builder + mock ------------------------------------------------
+
+
+def test_build_prompt_grounds_in_hits():
+    system, user = build_prompt("q", "be concise", [_hit("T. rex was big.")])
+    assert system == SYSTEM_PROMPT
+    assert "T. rex was big." in user
+    assert "be concise" in user
+    assert user.rstrip().endswith("Query: q")
+
+
+def test_mock_llm_summarises_from_hits():
+    r = MockLLM().summarise(query="q", instruction=None, hits=[_hit("Stegosaurus had plates.")])
+    assert r.model_id == "mock-llm-v1"
+    assert "plates" in r.text
+
+
+# --- Bedrock (fake Converse client) ---------------------------------------
+
+
+class _FakeConverse:
+    def __init__(self) -> None:
+        self.kwargs: dict | None = None
+
+    def converse(self, **kwargs):  # noqa: ANN003
+        self.kwargs = kwargs
+        return {
+            "output": {"message": {"content": [{"text": "FAKE SUMMARY"}]}},
+            "usage": {"inputTokens": 10, "outputTokens": 5, "cacheReadInputTokens": 3},
+        }
+
+
+def test_bedrock_llm_request_and_parse():
+    fake = _FakeConverse()
+    r = BedrockLLM(client=fake, prompt_cache=True).summarise(
+        query="q", instruction="edit", hits=[_hit("ctx-fossil")]
+    )
+    assert r.text == "FAKE SUMMARY" and r.model_id == BEDROCK_MODEL
+    assert (r.input_tokens, r.output_tokens, r.cache_read_tokens) == (10, 5, 3)
+    k = fake.kwargs
+    assert k["modelId"] == BEDROCK_MODEL
+    assert k["system"][0]["text"] == SYSTEM_PROMPT
+    assert k["system"][-1] == {"cachePoint": {"type": "default"}}  # native cache on
+    assert k["messages"][0]["role"] == "user"
+    assert "ctx-fossil" in k["messages"][0]["content"][0]["text"]
+    assert k["inferenceConfig"]["maxTokens"] >= 1
+
+
+def test_bedrock_llm_no_cachepoint_when_disabled():
+    fake = _FakeConverse()
+    BedrockLLM(client=fake, prompt_cache=False).summarise(
+        query="q", instruction=None, hits=[_hit("x")]
+    )
+    assert all("cachePoint" not in block for block in fake.kwargs["system"])
+
+
+def test_bedrock_llm_tolerates_empty_content():
+    class _Empty:
+        def converse(self, **k):  # noqa: ANN003
+            return {"output": {"message": {"content": []}}, "usage": {}}
+
+    r = BedrockLLM(client=_Empty()).summarise(query="q", instruction=None, hits=[_hit("x")])
+    assert r.text == ""  # graceful empty summary, not IndexError → 502
+
+
+# --- Anthropic (fake Messages client) -------------------------------------
+
+
+def test_anthropic_llm_request_and_parse():
+    from fossilrag.llm.anthropic import DEFAULT_MODEL, AnthropicLLM
+
+    class _Content:
+        def __init__(self, text):  # noqa: ANN001
+            self.text = text
+
+    class _Resp:
+        content = [_Content("ANT SUMMARY")]
+        usage = None
+
+    class _Messages:
+        def __init__(self, outer):  # noqa: ANN001
+            self.outer = outer
+
+        def create(self, **kwargs):  # noqa: ANN003
+            self.outer.kwargs = kwargs
+            return _Resp()
+
+    class _FakeAnthropic:
+        def __init__(self):
+            self.kwargs = None
+            self.messages = _Messages(self)
+
+    fake = _FakeAnthropic()
+    r = AnthropicLLM(client=fake).summarise(query="q", instruction=None, hits=[_hit("ctx")])
+    assert r.text == "ANT SUMMARY" and r.model_id == DEFAULT_MODEL
+    assert fake.kwargs["system"] == SYSTEM_PROMPT
+    assert "ctx" in fake.kwargs["messages"][0]["content"]
+
+
+# --- fossil_key (Prompt Fossilization key) --------------------------------
+
+
+def test_fossil_key_deterministic_and_sensitive():
+    hits = [_hit("a", "c1"), _hit("b", "c2")]
+    k = fossil_key("m", "q", "i", hits)
+    assert k == fossil_key("m", "q", "i", hits) and len(k) == 64
+    assert fossil_key("m", "q2", "i", hits) != k  # query
+    assert fossil_key("m", "q", "i", [_hit("a", "c1")]) != k  # hits
+    assert fossil_key("m2", "q", "i", hits) != k  # model
+    assert fossil_key("m", "q", None, hits) != k  # instruction
+
+
+def test_fossil_key_changes_with_geological_age():
+    # Same chunk_id but a re-ingested layer changed the age → different key, so
+    # a stale (wrong-age) cached summary is never served.
+    old = ExcavateHit(
+        chunk_id="c1",
+        doc_id="d",
+        ordinal=0,
+        content="x",
+        score=0.9,
+        layer_version=1,
+        geological_age="Holocene",
+    )
+    new = ExcavateHit(
+        chunk_id="c1",
+        doc_id="d",
+        ordinal=0,
+        content="x",
+        score=0.9,
+        layer_version=8,
+        geological_age="Cretaceous",
+    )
+    assert fossil_key("m", "q", None, [old]) != fossil_key("m", "q", None, [new])
+
+
+# --- caches ---------------------------------------------------------------
+
+
+def test_inmemory_cache():
+    c = InMemoryPromptCache()
+    assert c.get("k") is None
+    c.put("k", "v")
+    assert c.get("k") == "v"
+
+
+def test_inmemory_cache_lru_eviction():
+    c = InMemoryPromptCache(max_entries=2)
+    c.put("a", "1")
+    c.put("b", "2")
+    c.put("c", "3")  # over cap → evict least-recently-used ("a")
+    assert c.get("a") is None
+    assert c.get("b") == "2" and c.get("c") == "3"
+
+
+def test_local_file_cache_persists(tmp_path):
+    path = tmp_path / "pc.json"
+    LocalFilePromptCache(path).put("k", "v")
+    assert LocalFilePromptCache(path).get("k") == "v"  # survives a fresh instance
+
+
+def test_make_prompt_cache(tmp_path):
+    assert isinstance(
+        make_prompt_cache(Settings(prompt_cache_backend="memory")), InMemoryPromptCache
+    )
+    s = make_prompt_cache(
+        Settings(prompt_cache_backend="local", prompt_cache_path=str(tmp_path / "p.json"))
+    )
+    assert isinstance(s, LocalFilePromptCache)
+    with pytest.raises(ValueError):
+        make_prompt_cache(Settings(prompt_cache_backend="dynamodb"))
+
+
+def test_make_llm_dispatch():
+    assert isinstance(make_llm(Settings(llm_provider="mock")), MockLLM)
+    be = make_llm(Settings(llm_provider="bedrock", llm_model="us.anthropic.claude-sonnet-4-6"))
+    assert be.model_id == "us.anthropic.claude-sonnet-4-6"
+
+
+def test_dynamodb_prompt_cache_moto():
+    pytest.importorskip("moto")
+    boto3 = pytest.importorskip("boto3")
+    from moto import mock_aws
+
+    with mock_aws():
+        ddb = boto3.client("dynamodb", region_name="us-east-1")
+        ddb.create_table(
+            TableName="pc",
+            KeySchema=[{"AttributeName": "key", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "key", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        c = DynamoDBPromptCache("pc", client=ddb)
+        assert c.get("k") is None
+        c.put("k", "value")
+        assert c.get("k") == "value"

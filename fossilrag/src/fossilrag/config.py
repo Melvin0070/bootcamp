@@ -96,6 +96,20 @@ class Settings(BaseSettings):
     idempotency_table: str | None = None
     idempotency_manifest_path: str = "./.fossilrag/idempotency.json"
 
+    # --- LLM / mutate ----------------------------------------------------
+    llm_provider: str = "mock"  # mock | bedrock | anthropic
+    # Bedrock cross-region inference profile id (not the bare foundation id).
+    llm_model: str = "us.anthropic.claude-sonnet-4-6"
+    anthropic_model: str = "claude-sonnet-4-6"
+    llm_max_tokens: int = Field(default=1024, ge=1)
+    llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+    bedrock_prompt_cache: bool = True  # Bedrock native cachePoint on the system prefix
+
+    # --- Prompt Fossilization (prompt/output cache mutation) -------------
+    prompt_cache_backend: str = "memory"  # memory | local | dynamodb
+    prompt_cache_table: str | None = None
+    prompt_cache_path: str = "./.fossilrag/prompt_cache.json"
+
     # --- Service ---------------------------------------------------------
     log_level: str = "INFO"
     service_name: str = "fossilrag"
@@ -130,6 +144,20 @@ class Settings(BaseSettings):
     def _idem_backend_known(cls, v: str) -> str:
         if v not in {"null", "local", "dynamodb"}:
             raise ValueError(f"idempotency_backend must be null|local|dynamodb (got {v!r})")
+        return v
+
+    @field_validator("llm_provider")
+    @classmethod
+    def _llm_provider_known(cls, v: str) -> str:
+        if v not in {"mock", "bedrock", "anthropic"}:
+            raise ValueError(f"llm_provider must be mock|bedrock|anthropic (got {v!r})")
+        return v
+
+    @field_validator("prompt_cache_backend")
+    @classmethod
+    def _prompt_cache_backend_known(cls, v: str) -> str:
+        if v not in {"memory", "local", "dynamodb"}:
+            raise ValueError(f"prompt_cache_backend must be memory|local|dynamodb (got {v!r})")
         return v
 
     @field_validator("hnsw_ef_search")
