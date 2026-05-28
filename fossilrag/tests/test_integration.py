@@ -188,15 +188,17 @@ def test_excavate_endpoint_e2e():
             assert "thagomizer" in hits[0]["content"]
             assert hits[0]["score"] > 0.99
 
-            # /mutate (mock) retrieves and grounds a summary in the same fossils.
-            m = client.post(
-                "/mutate", json={"query": spike_para, "k": 3, "instruction": "be concise"}
-            )
-            assert m.status_code == 200
-            mr = m.json()
-            assert mr["mock"] is True
-            assert len(mr["used_chunks"]) == 3
-            assert "thagomizer" in mr["summary"]
+            # /mutate (mock) + Prompt Fossilization: first call computes, the
+            # second identical call is served from the cache instantly.
+            payload = {"query": spike_para, "k": 3, "instruction": "be concise"}
+            mr1 = client.post("/mutate", json=payload).json()
+            assert mr1["mock"] is True and mr1["cached"] is False
+            assert mr1["model_id"] == "mock-llm-v1"
+            assert len(mr1["used_chunks"]) == 3
+            assert "thagomizer" in mr1["summary"]
+            mr2 = client.post("/mutate", json=payload).json()
+            assert mr2["cached"] is True  # Prompt Fossilization hit
+            assert mr2["summary"] == mr1["summary"]
 
             # Unsupported content type → clean 422, not a 500.
             bad = client.post(

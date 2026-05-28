@@ -169,7 +169,9 @@ class MutateResponse(BaseModel):
     query: str
     instruction: str | None = None
     summary: str
+    model_id: str
     mock: bool
+    cached: bool = False
     used_chunks: list[ExcavateHit]
-    note: str
+    note: str = ""
     latency_ms: float

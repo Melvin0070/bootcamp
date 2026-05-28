@@ -16,6 +16,8 @@ from pydantic import ValidationError
 from fossilrag.api.app import (
     IngestRequest,
     get_embedder,
+    get_llm,
+    get_prompt_cache,
     get_store,
     settings_dep,
 )
@@ -35,6 +37,18 @@ def test_get_store_503_when_absent():
 def test_get_embedder_503_when_absent():
     with pytest.raises(HTTPException) as ei:
         get_embedder(_request(embedder=None))
+    assert ei.value.status_code == 503
+
+
+def test_get_llm_503_when_absent():
+    with pytest.raises(HTTPException) as ei:
+        get_llm(_request(llm=None))
+    assert ei.value.status_code == 503
+
+
+def test_get_prompt_cache_503_when_absent():
+    with pytest.raises(HTTPException) as ei:
+        get_prompt_cache(_request(prompt_cache=None))
     assert ei.value.status_code == 503
 
 
