@@ -45,13 +45,16 @@ make e2e                      # up -> ingest -> excavate -> assert -> down
 |--------|-------------|---------|
 | `GET`  | `/excavate` | Embed a query, return top-k nearest fossil chunks + geological-age metadata |
 | `POST` | `/ingest`   | Run a document through the full spine and index its fossils |
-| `POST` | `/mutate`   | Retrieve relevant fossils and return a grounded summary/edit (**mock LLM in PR0**; real Bedrock Converse + Prompt Fossilization in PR4) |
+| `POST` | `/mutate`   | Retrieve relevant fossils → grounded LLM summary/edit (pluggable mock/Bedrock/Anthropic) with Prompt Fossilization |
+| `GET`  | `/timetravel` | A document's fossils at a chosen layer version + how it relates to the latest |
+| `GET`  | `/diff`     | Changes between two fossil-layer versions of a document |
 | `GET`  | `/healthz`  | Pool + store readiness |
 | `GET`  | `/`         | Service info |
 
-`/mutate` currently returns a deterministic mock summary (`mock: true`) so the
-full surface is callable at $0. The further mutation endpoints (`/timetravel`,
-`/diff`, `/dataset`) arrive in later PRs.
+`/mutate` defaults to a deterministic mock LLM (`mock: true`) so the full
+surface is callable at $0; set `FOSSILRAG_LLM_PROVIDER=bedrock` for a real
+Claude summary. The `/dataset` (Fine-Tuning Dataset Builder) endpoint arrives
+in PR9.
 
 ---
 
@@ -102,7 +105,7 @@ FossilRAG implements **all three** brief use cases as one composed system, and
 | 2  | ✅ | Chunking: cleaning + token-aware semantic chunks w/ overlap + versioned gold (JSONL/Parquet) |
 | 3  | ✅ | Embedding: pluggable local (sentence-transformers) + Bedrock Titan v2 + **Self-Healing Idempotency** (DynamoDB ledger) |
 | 4  | ✅ | `/mutate`: pluggable LLM (mock/Bedrock Converse/Anthropic) + **Prompt Fossilization** (output cache) |
-| 5  | ⬜ | Time-Travel Query + Fossil Diff |
+| 5  | ✅ | **Time-Travel Query** (`/timetravel`) + **Fossil Diff** (`/diff`) over versioned fossil layers |
 | 6  | ⬜ | Automated Enrichment (markers: dates/metrics/error codes) |
 | 7  | ⬜ | Chat Excavation |
 | 8  | ⬜ | PPTX Slide Mutator |

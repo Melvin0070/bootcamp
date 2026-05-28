@@ -34,7 +34,7 @@ from pgvector.asyncpg import register_vector
 
 from fossilrag.config import Settings
 from fossilrag.logging import get_logger
-from fossilrag.models import Chunk, ExcavateHit
+from fossilrag.models import Chunk, ExcavateHit, FossilLayerChunk
 
 log = get_logger("vectorstore.pgvector")
 
@@ -110,6 +110,7 @@ class PgVectorStore:
             CREATE TABLE IF NOT EXISTS {self._table} (
                 chunk_id       text NOT NULL,
                 doc_id         text NOT NULL,
+                source_id      text NOT NULL DEFAULT '',
                 ordinal        integer NOT NULL,
                 content        text NOT NULL,
                 layer_version  integer NOT NULL DEFAULT 1,
@@ -137,6 +138,17 @@ class PgVectorStore:
             f"CREATE INDEX IF NOT EXISTS {self._table}_provenance_idx "
             f"ON {self._table} (model_id, embed_dim);"
         )
+        # Forward-compat: add source_id to a pre-existing table (CREATE TABLE
+        # IF NOT EXISTS can't add a column to an already-created table).
+        alter_source = (
+            f"ALTER TABLE {self._table} "
+            f"ADD COLUMN IF NOT EXISTS source_id text NOT NULL DEFAULT '';"
+        )
+        # Powers Time-Travel / Fossil Diff: list layers + fetch a layer in order.
+        source_idx = (
+            f"CREATE INDEX IF NOT EXISTS {self._table}_source_idx "
+            f"ON {self._table} (source_id, layer_version, ordinal);"
+        )
         # HNSW + cosine. Defaults m=16, ef_construction=64 are fine at this
         # scale; tuned higher only if recall demands it (docs/adr/0001).
         hnsw = (
@@ -146,9 +158,11 @@ class PgVectorStore:
         )
         async with self._pool.acquire() as conn:
             await conn.execute(ddl)
+            await conn.execute(alter_source)
             await conn.execute(doc_idx)
             await conn.execute(layer_idx)
             await conn.execute(prov_idx)
+            await conn.execute(source_idx)
             await conn.execute(hnsw)
         log.info("event=pgvector_bootstrapped table=%s dim=%d", self._table, self._dim)
 
@@ -186,16 +200,18 @@ class PgVectorStore:
                 json.dumps(c.metadata),
                 c.ingested_at,
                 vectors[i],
+                c.source_id,
             )
             for i, c in enumerate(chunks)
         ]
         sql = f"""
             INSERT INTO {self._table}
                 (chunk_id, doc_id, ordinal, content, layer_version, geological_age,
-                 model_id, embed_dim, metadata, ingested_at, embedding)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
+                 model_id, embed_dim, metadata, ingested_at, embedding, source_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12)
             ON CONFLICT (chunk_id, model_id, embed_dim) DO UPDATE SET
                 content        = EXCLUDED.content,
+                source_id      = EXCLUDED.source_id,
                 layer_version  = EXCLUDED.layer_version,
                 geological_age = EXCLUDED.geological_age,
                 metadata       = EXCLUDED.metadata,
@@ -272,6 +288,52 @@ class PgVectorStore:
                     self._dim,
                 )
             )
+
+    # -- fossil layers (Time-Travel / Diff) -------------------------------
+
+    async def list_layers(self, source_id: str) -> list[int]:
+        """Ascending list of fossil-layer versions for a logical document."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT DISTINCT layer_version FROM {self._table} "
+                f"WHERE source_id = $1 AND model_id = $2 AND embed_dim = $3 "
+                f"ORDER BY layer_version",
+                source_id,
+                self._model_id,
+                self._dim,
+            )
+        return [int(r["layer_version"]) for r in rows]
+
+    async def latest_layer(self, source_id: str) -> int | None:
+        layers = await self.list_layers(source_id)
+        return layers[-1] if layers else None
+
+    async def get_layer(self, source_id: str, layer_version: int) -> list[FossilLayerChunk]:
+        """All chunks of one fossil layer, in document order (no embedding)."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT chunk_id, doc_id, source_id, ordinal, content, layer_version, "
+                f"geological_age FROM {self._table} "
+                f"WHERE source_id = $1 AND layer_version = $2 "
+                f"AND model_id = $3 AND embed_dim = $4 "
+                f"ORDER BY ordinal",
+                source_id,
+                layer_version,
+                self._model_id,
+                self._dim,
+            )
+        return [
+            FossilLayerChunk(
+                chunk_id=r["chunk_id"],
+                doc_id=r["doc_id"],
+                source_id=r["source_id"],
+                ordinal=r["ordinal"],
+                content=r["content"],
+                layer_version=r["layer_version"],
+                geological_age=r["geological_age"],
+            )
+            for r in rows
+        ]
 
     async def healthcheck(self) -> bool:
         async with self._pool.acquire() as conn:
