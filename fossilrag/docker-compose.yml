@@ -1,0 +1,42 @@
+# Local end-to-end stack for the walking skeleton.
+#
+# PR0 needs only Postgres+pgvector and the API — no LocalStack (the AWS-backed
+# services arrive in later PRs, and LocalStack's free tier now requires an auth
+# token; see docs/adr/0001). `docker compose up` then `python -m scripts.smoke`
+# proves the spine over real HTTP. This same flow runs in CI (the compose-e2e
+# job), which is where it is verified — the dev box has no Docker.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: fossilrag
+      POSTGRES_PASSWORD: fossilrag
+      POSTGRES_DB: fossilrag
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fossilrag -d fossilrag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    environment:
+      DATABASE_URL: postgresql://fossilrag:fossilrag@postgres:5432/fossilrag
+      FOSSILRAG_LOG_LEVEL: INFO
+      FOSSILRAG_EMBED_PROVIDER: mock
+      FOSSILRAG_EMBED_DIM: "384"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
