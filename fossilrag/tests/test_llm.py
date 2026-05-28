@@ -6,7 +6,7 @@ import pytest
 
 from fossilrag.config import Settings
 from fossilrag.llm import fossil_key, make_llm, make_prompt_cache
-from fossilrag.llm.base import SYSTEM_PROMPT, build_prompt
+from fossilrag.llm.base import SYSTEM_PROMPT, build_chat, build_prompt
 from fossilrag.llm.bedrock import DEFAULT_MODEL as BEDROCK_MODEL
 from fossilrag.llm.bedrock import BedrockLLM
 from fossilrag.llm.cache import (
@@ -15,7 +15,7 @@ from fossilrag.llm.cache import (
     LocalFilePromptCache,
 )
 from fossilrag.llm.mock import MockLLM
-from fossilrag.models import ExcavateHit
+from fossilrag.models import ChatMessage, ExcavateHit
 
 
 def _hit(content: str, cid: str = "c1") -> ExcavateHit:
@@ -45,6 +45,47 @@ def test_mock_llm_summarises_from_hits():
     r = MockLLM().summarise(query="q", instruction=None, hits=[_hit("Stegosaurus had plates.")])
     assert r.model_id == "mock-llm-v1"
     assert "plates" in r.text
+
+
+def test_build_chat_grounds_context_and_maps_turns():
+    msgs = [
+        ChatMessage(role="user", content="What plates?"),
+        ChatMessage(role="assistant", content="Bony ones."),
+        ChatMessage(role="user", content="How many rows?"),
+    ]
+    system, turns = build_chat(msgs, [_hit("Stegosaurus had two rows of plates.")])
+    assert "Stegosaurus had two rows" in system  # fossil context lives in the system prompt
+    assert turns == [
+        {"role": "user", "content": "What plates?"},
+        {"role": "assistant", "content": "Bony ones."},
+        {"role": "user", "content": "How many rows?"},
+    ]
+
+
+def test_mock_llm_chat_answers_from_last_user_turn():
+    r = MockLLM().chat(
+        messages=[
+            ChatMessage(role="user", content="hi"),
+            ChatMessage(role="assistant", content="hello"),
+            ChatMessage(role="user", content="tell me about the plates"),
+        ],
+        hits=[_hit("Stegosaurus plates.")],
+    )
+    assert r.model_id == "mock-llm-v1" and "plates" in r.text
+
+
+def test_bedrock_chat_sends_turns_and_context():
+    fake = _FakeConverse()
+    BedrockLLM(client=fake).chat(
+        messages=[
+            ChatMessage(role="user", content="hi"),
+            ChatMessage(role="assistant", content="hey"),
+            ChatMessage(role="user", content="about the context?"),
+        ],
+        hits=[_hit("ctx-fossil")],
+    )
+    assert [m["role"] for m in fake.kwargs["messages"]] == ["user", "assistant", "user"]
+    assert "ctx-fossil" in fake.kwargs["system"][0]["text"]
 
 
 # --- Bedrock (fake Converse client) ---------------------------------------
@@ -127,6 +168,19 @@ def test_anthropic_llm_request_and_parse():
     assert r.text == "ANT SUMMARY" and r.model_id == DEFAULT_MODEL
     assert fake.kwargs["system"] == SYSTEM_PROMPT
     assert "ctx" in fake.kwargs["messages"][0]["content"]
+
+    # chat path: turns mapped, fossil context grounded in the system prompt
+    fake2 = _FakeAnthropic()
+    AnthropicLLM(client=fake2).chat(
+        messages=[
+            ChatMessage(role="user", content="hi"),
+            ChatMessage(role="assistant", content="yo"),
+            ChatMessage(role="user", content="more"),
+        ],
+        hits=[_hit("ctx2")],
+    )
+    assert [m["role"] for m in fake2.kwargs["messages"]] == ["user", "assistant", "user"]
+    assert "ctx2" in fake2.kwargs["system"]
 
 
 # --- fossil_key (Prompt Fossilization key) --------------------------------

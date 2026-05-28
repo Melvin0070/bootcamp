@@ -9,7 +9,7 @@ provider interface + Prompt Fossilization around it; swap ``llm_provider`` to
 from __future__ import annotations
 
 from fossilrag.llm.base import LLMResult
-from fossilrag.models import ExcavateHit
+from fossilrag.models import ChatMessage, ExcavateHit
 from fossilrag.mutate import mock_summarise
 
 MODEL_ID = "mock-llm-v1"
@@ -24,4 +24,9 @@ class MockLLM:
         self, *, query: str, instruction: str | None, hits: list[ExcavateHit]
     ) -> LLMResult:
         text = mock_summarise(query, instruction, hits)
+        return LLMResult(text=text, model_id=MODEL_ID, output_tokens=len(text) // 4)
+
+    def chat(self, *, messages: list[ChatMessage], hits: list[ExcavateHit]) -> LLMResult:
+        last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
+        text = mock_summarise(last_user, None, hits)
         return LLMResult(text=text, model_id=MODEL_ID, output_tokens=len(text) // 4)

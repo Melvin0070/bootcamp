@@ -17,9 +17,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fossilrag.llm.base import LLMResult, build_prompt
+from fossilrag.llm.base import LLMResult, build_chat, build_prompt
 from fossilrag.logging import get_logger
-from fossilrag.models import ExcavateHit
+from fossilrag.models import ChatMessage, ExcavateHit
 
 log = get_logger("llm.bedrock")
 
@@ -56,10 +56,8 @@ class BedrockLLM:
     def model_id(self) -> str:
         return self._model_id
 
-    def summarise(
-        self, *, query: str, instruction: str | None, hits: list[ExcavateHit]
-    ) -> LLMResult:
-        system_text, user_text = build_prompt(query, instruction, hits)
+    def _invoke(self, system_text: str, turns: list[dict]) -> LLMResult:
+        """Run one Converse call from a system prompt + role/content turns."""
         system: list[dict] = [{"text": system_text}]
         if self._prompt_cache:
             # Cache the static system prefix across requests (Bedrock native).
@@ -68,7 +66,7 @@ class BedrockLLM:
         resp = self._ensure_client().converse(
             modelId=self._model_id,
             system=system,
-            messages=[{"role": "user", "content": [{"text": user_text}]}],
+            messages=[{"role": t["role"], "content": [{"text": t["content"]}]} for t in turns],
             inferenceConfig={"maxTokens": self._max_tokens, "temperature": self._temperature},
         )
         # Extract defensively: a stopReason=max_tokens / guardrail / reasoning-only
@@ -78,11 +76,12 @@ class BedrockLLM:
         text = next((b["text"] for b in blocks if isinstance(b, dict) and "text" in b), "")
         usage = resp.get("usage", {})
         log.info(
-            "event=bedrock_converse model=%s in=%s out=%s cache_read=%s",
+            "event=bedrock_converse model=%s in=%s out=%s cache_read=%s turns=%d",
             self._model_id,
             usage.get("inputTokens"),
             usage.get("outputTokens"),
             usage.get("cacheReadInputTokens"),
+            len(turns),
         )
         return LLMResult(
             text=text,
@@ -91,3 +90,13 @@ class BedrockLLM:
             output_tokens=usage.get("outputTokens", 0),
             cache_read_tokens=usage.get("cacheReadInputTokens", 0),
         )
+
+    def summarise(
+        self, *, query: str, instruction: str | None, hits: list[ExcavateHit]
+    ) -> LLMResult:
+        system_text, user_text = build_prompt(query, instruction, hits)
+        return self._invoke(system_text, [{"role": "user", "content": user_text}])
+
+    def chat(self, *, messages: list[ChatMessage], hits: list[ExcavateHit]) -> LLMResult:
+        system_text, turns = build_chat(messages, hits)
+        return self._invoke(system_text, turns)

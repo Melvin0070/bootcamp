@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fossilrag.llm.base import LLMResult, build_prompt
+from fossilrag.llm.base import LLMResult, build_chat, build_prompt
 from fossilrag.logging import get_logger
-from fossilrag.models import ExcavateHit
+from fossilrag.models import ChatMessage, ExcavateHit
 
 log = get_logger("llm.anthropic")
 
@@ -43,16 +43,13 @@ class AnthropicLLM:
     def model_id(self) -> str:
         return self._model_id
 
-    def summarise(
-        self, *, query: str, instruction: str | None, hits: list[ExcavateHit]
-    ) -> LLMResult:
-        system_text, user_text = build_prompt(query, instruction, hits)
+    def _invoke(self, system_text: str, turns: list[dict]) -> LLMResult:
         resp = self._ensure_client().messages.create(
             model=self._model_id,
             max_tokens=self._max_tokens,
             temperature=self._temperature,
             system=system_text,
-            messages=[{"role": "user", "content": user_text}],
+            messages=[{"role": t["role"], "content": t["content"]} for t in turns],
         )
         # Defensive: tolerate empty / non-text content blocks (return "").
         blocks = getattr(resp, "content", None) or []
@@ -64,3 +61,13 @@ class AnthropicLLM:
             input_tokens=getattr(usage, "input_tokens", 0) if usage else 0,
             output_tokens=getattr(usage, "output_tokens", 0) if usage else 0,
         )
+
+    def summarise(
+        self, *, query: str, instruction: str | None, hits: list[ExcavateHit]
+    ) -> LLMResult:
+        system_text, user_text = build_prompt(query, instruction, hits)
+        return self._invoke(system_text, [{"role": "user", "content": user_text}])
+
+    def chat(self, *, messages: list[ChatMessage], hits: list[ExcavateHit]) -> LLMResult:
+        system_text, turns = build_chat(messages, hits)
+        return self._invoke(system_text, turns)

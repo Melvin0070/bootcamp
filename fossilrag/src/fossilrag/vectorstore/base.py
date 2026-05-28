@@ -30,8 +30,13 @@ class VectorStore(Protocol):
         """
         ...
 
-    async def search(self, query_vector: np.ndarray, k: int) -> list[ExcavateHit]:
-        """Return the ``k`` nearest chunks to ``query_vector`` by cosine similarity."""
+    async def search(
+        self, query_vector: np.ndarray, k: int, source_id: str | None = None
+    ) -> list[ExcavateHit]:
+        """Return the ``k`` nearest chunks to ``query_vector`` by cosine similarity.
+
+        Optionally scope retrieval to a single ``source_id`` (logical document).
+        """
         ...
 
     async def list_layers(self, source_id: str) -> list[int]:
