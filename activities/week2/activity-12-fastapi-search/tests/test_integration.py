@@ -74,7 +74,7 @@ class TestIndexUsage:
                 "EXPLAIN (FORMAT TEXT) "
                 "SELECT id, species, age_mya, notes FROM specimens "
                 "WHERE species ILIKE $1 ORDER BY species LIMIT $2",
-                "%sp4999%",
+                "%sp199999%",
                 10,
             )
         plan = "\n".join(r[0] for r in plan_rows)
@@ -161,3 +161,27 @@ class TestAppEndToEnd:
         body = resp.json()
         assert body["status"] == "ok"
         assert "pool_size" in body
+
+
+class TestLifespan:
+    """Exercise the real FastAPI lifespan (create_pool at startup,
+    pool.close at shutdown) end to end. LifespanManager + httpx
+    AsyncClient keep everything on one event loop; the lifespan reads
+    DATABASE_URL (set by CI or by the conftest testcontainers path) and
+    builds its OWN pool, separate from the pg_pool fixture."""
+
+    async def test_lifespan_starts_pool_and_serves_request(self, pg_pool):
+        import httpx
+        from asgi_lifespan import LifespanManager
+
+        import app as app_module
+
+        async with LifespanManager(app_module.app):
+            # Lifespan has run: _POOL is a live pool created from DATABASE_URL.
+            assert app_module._POOL is not None
+            transport = httpx.ASGITransport(app=app_module.app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.get("/search?q=stego&limit=3")
+            assert resp.status_code == 200
+            assert len(resp.json()["results"]) > 0
+        # After the context exits, lifespan shutdown has closed the pool.

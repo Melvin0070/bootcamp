@@ -117,6 +117,41 @@ class TestValidation:
         assert resp.status_code == 503
 
 
+class TestErrorBranches:
+    """Cover the defensive except branches: a DB error mid-query and an
+    unhealthy pool must surface as 500, not an unhandled crash."""
+
+    def test_search_db_error_returns_500(self, monkeypatch):
+        import asyncpg
+
+        import app as app_module
+
+        # A non-None sentinel pool so the guard passes; the failure is
+        # injected at the query layer instead.
+        app_module._POOL = object()
+
+        async def boom(*_a, **_k):
+            raise asyncpg.exceptions.PostgresError("simulated db failure")
+
+        monkeypatch.setattr(app_module, "search_specimens", boom)
+        client = TestClient(app_module.app, raise_server_exceptions=False)
+        resp = client.get("/search?q=trex&limit=5")
+        assert resp.status_code == 500
+
+    def test_healthz_unhealthy_pool_returns_500(self, monkeypatch):
+        import app as app_module
+
+        app_module._POOL = object()
+
+        async def boom(*_a, **_k):
+            raise RuntimeError("pool exploded")
+
+        monkeypatch.setattr(app_module, "healthcheck", boom)
+        client = TestClient(app_module.app, raise_server_exceptions=False)
+        resp = client.get("/healthz")
+        assert resp.status_code == 500
+
+
 # ---------------------------------------------------------------------------
 # Broken-baseline regression — the anti-patterns must remain so the
 # before/after stays demonstrable.
