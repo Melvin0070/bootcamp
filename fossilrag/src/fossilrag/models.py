@@ -261,3 +261,21 @@ class ChatResponse(BaseModel):
     cached: bool = False
     citations: list[ExcavateHit]
     latency_ms: float
+
+
+class SlideMutateResponse(BaseModel):
+    """PPTX Slide Mutator: an edit suggestion + the diff, with optional versioning."""
+
+    source_id: str | None = None
+    instruction: str
+    original: str
+    suggestion: str
+    model_id: str
+    mock: bool
+    cached: bool = False
+    changed: bool
+    added_lines: int
+    removed_lines: int
+    unified_diff: str
+    # When persisted, the new fossil-layer version the suggestion was saved as.
+    persisted_version: int | None = None

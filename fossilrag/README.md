@@ -51,6 +51,7 @@ make e2e                      # up -> ingest -> excavate -> assert -> down
 | `POST` | `/enrich`   | Extract structured markers (dates/metrics/error codes) → versioned enrichment record |
 | `GET`  | `/markers`  | Retrieve a document layer's stored enrichment record |
 | `POST` | `/chat`     | Multi-turn chat grounded in fossils (optional `source_id` scope) with geological-age citations |
+| `POST` | `/slide/mutate` | Propose a slide edit + diff; optionally persist as a new fossil-layer version |
 | `GET`  | `/healthz`  | Pool + store readiness |
 | `GET`  | `/`         | Service info |
 
@@ -111,7 +112,7 @@ FossilRAG implements **all three** brief use cases as one composed system, and
 | 5  | ✅ | **Time-Travel Query** (`/timetravel`) + **Fossil Diff** (`/diff`) over versioned fossil layers |
 | 6  | ✅ | **Automated Enrichment** (`/enrich`, `/markers`): extract dates/metrics/error-codes → structured DB |
 | 7  | ✅ | **Chat Excavation** (`/chat`): multi-turn, source-scoped retrieval, geological-age citations |
-| 8  | ⬜ | PPTX Slide Mutator |
+| 8  | ✅ | **PPTX Slide Mutator** (`/slide/mutate`): edit suggestion + diff + version tracking (new fossil layer) |
 | 9  | ⬜ | Fine-Tuning Dataset Builder |
 | 10 | ⬜ | Auto-Scaling Lambda + DLQ |
 | 11 | ⬜ | Terraform IaC (live-deploy-ready) |

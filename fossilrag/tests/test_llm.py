@@ -6,7 +6,13 @@ import pytest
 
 from fossilrag.config import Settings
 from fossilrag.llm import fossil_key, make_llm, make_prompt_cache
-from fossilrag.llm.base import SYSTEM_PROMPT, build_chat, build_prompt
+from fossilrag.llm.base import (
+    EDIT_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    build_chat,
+    build_edit_prompt,
+    build_prompt,
+)
 from fossilrag.llm.bedrock import DEFAULT_MODEL as BEDROCK_MODEL
 from fossilrag.llm.bedrock import BedrockLLM
 from fossilrag.llm.cache import (
@@ -80,6 +86,29 @@ def test_mock_llm_chat_answers_from_last_user_turn():
         hits=[_hit("Stegosaurus plates.")],
     )
     assert r.model_id == "mock-llm-v1" and "plates" in r.text
+
+
+def test_build_edit_prompt():
+    system, user = build_edit_prompt("Old slide text.", "make concise")
+    assert system == EDIT_SYSTEM_PROMPT
+    assert "make concise" in user and "Old slide text." in user
+
+
+def test_mock_llm_edit_is_concise_and_deterministic():
+    text = "First point here. Second point here. Third point now. Fourth point too."
+    r1 = MockLLM().edit(text=text, instruction="make concise")
+    r2 = MockLLM().edit(text=text, instruction="make concise")
+    assert r1.text == r2.text  # deterministic
+    assert 0 < len(r1.text) < len(text)  # shorter (keeps first half of sentences)
+    assert r1.model_id == "mock-llm-v1"
+
+
+def test_bedrock_edit_uses_edit_system_prompt():
+    fake = _FakeConverse()
+    BedrockLLM(client=fake).edit(text="slide text here", instruction="shorten it")
+    assert fake.kwargs["system"][0]["text"] == EDIT_SYSTEM_PROMPT
+    user_text = fake.kwargs["messages"][0]["content"][0]["text"]
+    assert "slide text here" in user_text and "shorten it" in user_text
 
 
 def test_bedrock_chat_sends_turns_and_context():

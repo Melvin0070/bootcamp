@@ -30,3 +30,13 @@ class MockLLM:
         last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
         text = mock_summarise(last_user, None, hits)
         return LLMResult(text=text, model_id=MODEL_ID, output_tokens=len(text) // 4)
+
+    def edit(self, *, text: str, instruction: str) -> LLMResult:
+        # Deterministic "concise" mock: keep the first half of the sentences.
+        # Real editing arrives with a cloud provider; this proves the
+        # edit→diff→version-tracking plumbing at $0.
+        from fossilrag.chunking.text import split_sentences
+
+        sents = split_sentences(text)
+        revised = " ".join(sents[: max(1, len(sents) // 2)]) if sents else text
+        return LLMResult(text=revised, model_id=MODEL_ID, output_tokens=len(revised) // 4)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fossilrag.llm.base import LLMResult, build_chat, build_prompt
+from fossilrag.llm.base import LLMResult, build_chat, build_edit_prompt, build_prompt
 from fossilrag.logging import get_logger
 from fossilrag.models import ChatMessage, ExcavateHit
 
@@ -71,3 +71,7 @@ class AnthropicLLM:
     def chat(self, *, messages: list[ChatMessage], hits: list[ExcavateHit]) -> LLMResult:
         system_text, turns = build_chat(messages, hits)
         return self._invoke(system_text, turns)
+
+    def edit(self, *, text: str, instruction: str) -> LLMResult:
+        system_text, user_text = build_edit_prompt(text, instruction)
+        return self._invoke(system_text, [{"role": "user", "content": user_text}])
