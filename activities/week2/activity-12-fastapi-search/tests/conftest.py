@@ -86,10 +86,16 @@ async def _apply_migrations_and_seed(pool: asyncpg.Pool) -> None:
     schema = (MIGRATIONS / "0000_schema.sql").read_text()
     index = (MIGRATIONS / "0001_search_index.sql").read_text()
     genera_array = "ARRAY[" + ",".join(f"'{g}'" for g in GENERA) + "]"
+    # The pool sets command_timeout=5s (a per-request guard). Seeding
+    # 200k rows + ANALYZE + index build can exceed that on a slow CI
+    # runner, so pass a generous per-call timeout to the heavy
+    # fixture-setup statements to override the pool default. (This is a
+    # one-time setup cost, not a request path.)
+    SETUP_TIMEOUT = 120.0
     async with pool.acquire() as conn:
-        await conn.execute(schema)
-        await conn.execute(index)
-        await conn.execute("TRUNCATE specimens RESTART IDENTITY")
+        await conn.execute(schema, timeout=SETUP_TIMEOUT)
+        await conn.execute(index, timeout=SETUP_TIMEOUT)
+        await conn.execute("TRUNCATE specimens RESTART IDENTITY", timeout=SETUP_TIMEOUT)
         # Seed server-side with generate_series — orders of magnitude
         # faster than executemany, and big enough (SEED_ROWS) that the
         # planner genuinely prefers the GIN index over a seq scan. On a
@@ -104,10 +110,11 @@ async def _apply_migrations_and_seed(pool: asyncpg.Pool) -> None:
                 (65 + (g % 180))::numeric,
                 'note ' || g
             FROM generate_series(0, {SEED_ROWS - 1}) AS g
-            """
+            """,
+            timeout=SETUP_TIMEOUT,
         )
         # ANALYZE so the planner has stats and will pick the index.
-        await conn.execute("ANALYZE specimens")
+        await conn.execute("ANALYZE specimens", timeout=SETUP_TIMEOUT)
         # Fail loud + clear if the migration didn't actually create the
         # index, instead of letting a later EXPLAIN assertion fail with a
         # confusing "Seq Scan" message.
