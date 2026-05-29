@@ -31,8 +31,9 @@ dependencies = [
 # Local CPU embedding fallback (dev/compose). torch+transformers ~2GB — never
 # shipped in a Lambda zip; that is precisely why Bedrock is the cloud default.
 local-embeddings = ["sentence-transformers>=5.5"]
-# AWS cloud backends (Bedrock LLM + Titan embeddings, DynamoDB, S3, SQS).
-aws = ["boto3>=1.43"]
+# AWS cloud backends (Bedrock LLM + Titan embeddings, DynamoDB, S3, SQS) +
+# the Mangum ASGI→Lambda adapter for the API behind API Gateway.
+aws = ["boto3>=1.43", "mangum>=0.18"]
 # Alternate vector backends.
 faiss = ["faiss-cpu>=1.9"]
 opensearch = ["opensearch-py>=2.6", "boto3>=1.43"]
@@ -54,6 +55,7 @@ dev = [
     "python-pptx>=1.0.2",
     "fpdf2>=2.8",
     "pyarrow>=18",
+    "mangum>=0.18",
 ]
 
 [tool.hatch.build.targets.wheel]

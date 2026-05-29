@@ -21,6 +21,14 @@ dist/
 # Node (React Fossil UI, PR13)
 node_modules/
 
+# Terraform (infra/)
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+terraform.tfvars
+fossilrag/infra/build/
+
 # Environment files
 .env
 
