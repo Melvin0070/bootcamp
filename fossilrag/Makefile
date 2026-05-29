@@ -1,4 +1,4 @@
-.PHONY: install lint fmt test test-unit up up-aws down logs ps seed smoke demo config e2e clean
+.PHONY: install lint fmt test test-unit up up-aws up-ui down logs ps seed smoke demo config e2e ui-install ui-test ui-build clean
 
 install:  ## Install the package + dev tooling (editable)
 	pip install -e ".[dev]"
@@ -23,8 +23,11 @@ up:  ## build + start the lean spine (postgres + api) — what CI smoke-tests
 up-aws:  ## build + start the full emulated stack (+ localstack + bootstrap + worker)
 	docker compose --profile aws up -d --build
 
-down:  ## stop the stack (both profiles) and drop volumes
-	docker compose --profile aws down -v
+up-ui:  ## build + start postgres + api + the React UI (http://localhost:5173)
+	docker compose --profile ui up -d --build
+
+down:  ## stop the stack (all profiles) and drop volumes
+	docker compose --profile aws --profile ui down -v
 
 logs:  ## tail the API logs
 	docker compose logs -f api
@@ -41,8 +44,20 @@ smoke:  ## end-to-end HTTP smoke test against a running API (retrieval half)
 demo:  ## run the S3->SQS->worker->silver ingestion demo (needs up-aws)
 	docker compose --profile aws run --rm worker python -m scripts.demo_aws
 
-config:  ## validate compose for BOTH the default and aws profiles (no creds)
-	docker compose config -q && docker compose --profile aws config -q && echo "compose OK (default + aws)"
+config:  ## validate compose for the default + aws + ui profiles (no creds)
+	docker compose config -q \
+	  && docker compose --profile aws config -q \
+	  && docker compose --profile ui config -q \
+	  && echo "compose OK (default + aws + ui)"
+
+ui-install:  ## install the UI deps (Bun)
+	cd ui && bun install --frozen-lockfile
+
+ui-test:  ## UI lint + typecheck + render tests
+	cd ui && bun run lint && bun run typecheck && bun run test
+
+ui-build:  ## production build of the UI
+	cd ui && bun run build
 
 e2e: up  ## full local end-to-end: up -> smoke -> down
 	python -m scripts.smoke

@@ -48,6 +48,20 @@ the worker to land them in silver, then **re-uploads the same objects** to show
 self-healing idempotency — the redelivered S3 events are no-ops (no new silver
 writes), and the DynamoDB ledger reports them as already processed.
 
+## 3. The React UI — `--profile ui`
+
+Adds `ui` (mutation #7): an nginx container serving the built React SPA and
+reverse-proxying `/api` → the `api` service (so the browser is same-origin — no
+CORS). Built with Bun; see [`../ui/README.md`](../ui/README.md).
+
+```bash
+make up-ui         # postgres + api + UI at http://localhost:5173
+```
+
+Profiled like `aws`, so the default `up` (and CI's compose-e2e) stay the lean
+spine. The UI's logic is gated by its own `ui` CI job (Biome + typecheck +
+Vitest render suite + `vite build`); visual QA is manual.
+
 ## LocalStack auth token (required)
 
 Since **LocalStack 2026.03** the unified image needs an account token — even
