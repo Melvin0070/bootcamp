@@ -34,6 +34,21 @@ x-aws-env: &aws-env
   FOSSILRAG_PROMPT_CACHE_TABLE: fossilrag-prompt-cache
   FOSSILRAG_LOG_LEVEL: INFO
 
+# AI providers. Mock by default ($0, offline). Set these (e.g. in a .env file)
+# to flip the whole stack to REAL AI — e.g. free Gemini via its OpenAI-compat
+# endpoint: FOSSILRAG_LLM_PROVIDER=openai, FOSSILRAG_EMBED_PROVIDER=openai,
+# FOSSILRAG_OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/,
+# FOSSILRAG_OPENAI_API_KEY=..., FOSSILRAG_OPENAI_MODEL=gemini-2.0-flash,
+# FOSSILRAG_EMBED_MODEL=text-embedding-004, FOSSILRAG_EMBED_DIM=768.
+x-ai-env: &ai-env
+  FOSSILRAG_EMBED_PROVIDER: ${FOSSILRAG_EMBED_PROVIDER:-mock}
+  FOSSILRAG_EMBED_MODEL: ${FOSSILRAG_EMBED_MODEL:-mock-deterministic-v1}
+  FOSSILRAG_EMBED_DIM: ${FOSSILRAG_EMBED_DIM:-384}
+  FOSSILRAG_LLM_PROVIDER: ${FOSSILRAG_LLM_PROVIDER:-mock}
+  FOSSILRAG_OPENAI_API_KEY: ${FOSSILRAG_OPENAI_API_KEY:-}
+  FOSSILRAG_OPENAI_BASE_URL: ${FOSSILRAG_OPENAI_BASE_URL:-}
+  FOSSILRAG_OPENAI_MODEL: ${FOSSILRAG_OPENAI_MODEL:-gpt-4o-mini}
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -56,10 +71,9 @@ services:
       context: .
       dockerfile: docker/api.Dockerfile
     environment:
+      <<: *ai-env
       DATABASE_URL: postgresql://fossilrag:fossilrag@postgres:5432/fossilrag
       FOSSILRAG_LOG_LEVEL: INFO
-      FOSSILRAG_EMBED_PROVIDER: mock
-      FOSSILRAG_EMBED_DIM: "384"
     ports:
       - "8000:8000"
     depends_on:
@@ -102,10 +116,18 @@ services:
       dockerfile: docker/worker.Dockerfile
     profiles: ["aws"]
     command: ["python", "-m", "scripts.worker"]
-    environment: *aws-env
+    # AWS + AI env, plus the DB + index flag: with FOSSILRAG_WORKER_INDEX=true the
+    # worker runs the full pipeline (extract→embed→upsert) so an S3 upload becomes
+    # searchable end-to-end. Uses the SAME embedder as the api (so vectors match).
+    environment:
+      <<: [*aws-env, *ai-env]
+      DATABASE_URL: postgresql://fossilrag:fossilrag@postgres:5432/fossilrag
+      FOSSILRAG_WORKER_INDEX: ${FOSSILRAG_WORKER_INDEX:-false}
     depends_on:
       bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   # ---- `ui` profile: React Fossil UI (mutation #7) -------------------------

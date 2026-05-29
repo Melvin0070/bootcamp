@@ -16,7 +16,9 @@ WORKDIR /app
 # Deps first for layer caching, then source + the script entrypoints.
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install --upgrade pip && pip install ".[aws]"
+# aws = boto3/SQS/S3/DynamoDB; openai = the embedder for indexed mode
+# (worker_index=true → extract→chunk→embed→upsert into pgvector).
+RUN pip install --upgrade pip && pip install ".[aws,openai]"
 COPY scripts ./scripts
 
 # Drop privileges.

@@ -14,7 +14,9 @@ WORKDIR /app
 # needs to resolve dependencies, then the source.
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install --upgrade pip && pip install .
+# `.[openai]` so the real-AI demo path (OpenAI / Gemini OpenAI-compat) works by
+# env; the mock default needs no key. Bedrock would additionally need `.[aws]`.
+RUN pip install --upgrade pip && pip install ".[openai]"
 
 # Drop privileges.
 RUN useradd --create-home --uid 10001 fossil && chown -R fossil /app

@@ -43,4 +43,14 @@ def make_embedder(settings=None):  # noqa: ANN001, ANN201
         return BedrockEmbedder(
             model_id=model_id, dimensions=settings.embed_dim, region=settings.aws_region
         )
-    raise ValueError(f"Unknown embed_provider={provider!r} (mock|local|bedrock).")
+    if provider == "openai":
+        from fossilrag.embedding.openai_compat import DEFAULT_MODEL, OpenAICompatEmbedder
+
+        name = model if model and not model.startswith("mock") else DEFAULT_MODEL
+        return OpenAICompatEmbedder(
+            model_id=name,
+            dimensions=settings.embed_dim,
+            base_url=settings.openai_base_url,
+            api_key=settings.openai_api_key,
+        )
+    raise ValueError(f"Unknown embed_provider={provider!r} (mock|local|bedrock|openai).")

@@ -34,6 +34,9 @@ local-embeddings = ["sentence-transformers>=5.5"]
 # AWS cloud backends (Bedrock LLM + Titan embeddings, DynamoDB, S3, SQS) +
 # the Mangum ASGI→Lambda adapter for the API behind API Gateway.
 aws = ["boto3>=1.43", "mangum>=0.18"]
+# OpenAI-compatible LLM + embeddings (OpenAI, Google Gemini's OpenAI-compat
+# endpoint, Ollama, OpenRouter, …) — the recommended free/cheap real-AI path.
+openai = ["openai>=1.50"]
 # Cloud-native vector backend (the documented next step; not yet bound — an
 # OpenSearchStore impl is TODO, so the dep is here for that work, not yet used).
 opensearch = ["opensearch-py>=2.6", "boto3>=1.43"]

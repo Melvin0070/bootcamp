@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     # even at identical dimensionality. Switching providers => re-embed.
     embed_provider: str = Field(
         default="mock",
-        description="Embedder backend: mock | local | bedrock.",
+        description="Embedder backend: mock | local | bedrock | openai.",
     )
     embed_model: str = Field(
         default="mock-deterministic-v1",
@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     # Long-poll window + per-receive batch the local poller uses.
     sqs_wait_seconds: int = Field(default=10, ge=0, le=20)
     sqs_max_messages: int = Field(default=10, ge=1, le=10)
+    # When true, the worker runs the FULL ingest pipeline per object (extract →
+    # chunk → embed → upsert into the vector store) so an S3 upload becomes
+    # searchable end-to-end — not just written to silver. Needs DATABASE_URL +
+    # an embedder. Default false keeps the lean, DB-free silver-only worker.
+    worker_index: bool = False
 
     # --- Idempotency (Self-Healing Idempotency mutation) -----------------
     idempotency_backend: str = "null"  # null | local | dynamodb
@@ -114,13 +119,25 @@ class Settings(BaseSettings):
     idempotency_manifest_path: str = "./.fossilrag/idempotency.json"
 
     # --- LLM / mutate ----------------------------------------------------
-    llm_provider: str = "mock"  # mock | bedrock | anthropic
+    llm_provider: str = "mock"  # mock | bedrock | anthropic | openai
     # Bedrock cross-region inference profile id (not the bare foundation id).
     llm_model: str = "us.anthropic.claude-sonnet-4-6"
     anthropic_model: str = "claude-sonnet-4-6"
     llm_max_tokens: int = Field(default=1024, ge=1)
     llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     bedrock_prompt_cache: bool = True  # Bedrock native cachePoint on the system prefix
+
+    # OpenAI-compatible provider — one config powers OpenAI, Google Gemini (its
+    # OpenAI-compat endpoint), Ollama, OpenRouter, … for BOTH the /mutate+/chat
+    # LLM (llm_provider=openai, model=openai_model) AND embeddings
+    # (embed_provider=openai, model=embed_model). Point openai_base_url at the
+    # vendor; e.g. Gemini (free): https://generativelanguage.googleapis.com/v1beta/openai/
+    openai_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("FOSSILRAG_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    )
+    openai_base_url: str | None = None  # None = OpenAI default
+    openai_model: str = "gpt-4o-mini"  # LLM model (e.g. gemini-2.0-flash)
 
     # --- Prompt Fossilization (prompt/output cache mutation) -------------
     prompt_cache_backend: str = "memory"  # memory | local | dynamodb
@@ -169,8 +186,8 @@ class Settings(BaseSettings):
     @field_validator("llm_provider")
     @classmethod
     def _llm_provider_known(cls, v: str) -> str:
-        if v not in {"mock", "bedrock", "anthropic"}:
-            raise ValueError(f"llm_provider must be mock|bedrock|anthropic (got {v!r})")
+        if v not in {"mock", "bedrock", "anthropic", "openai"}:
+            raise ValueError(f"llm_provider must be mock|bedrock|anthropic|openai (got {v!r})")
         return v
 
     @field_validator("prompt_cache_backend")

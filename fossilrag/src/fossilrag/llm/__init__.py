@@ -47,4 +47,14 @@ def make_llm(settings=None):  # noqa: ANN001, ANN201
             max_tokens=settings.llm_max_tokens,
             temperature=settings.llm_temperature,
         )
-    raise ValueError(f"Unknown llm_provider={provider!r} (mock|bedrock|anthropic).")
+    if provider == "openai":
+        from fossilrag.llm.openai_compat import OpenAILLM
+
+        return OpenAILLM(
+            model_id=settings.openai_model,
+            base_url=settings.openai_base_url,
+            api_key=settings.openai_api_key,
+            max_tokens=settings.llm_max_tokens,
+            temperature=settings.llm_temperature,
+        )
+    raise ValueError(f"Unknown llm_provider={provider!r} (mock|bedrock|anthropic|openai).")

@@ -27,6 +27,14 @@ Show the ranked **fossil cards**: cosine score, `geological_age`, `layer_version
 `source_id`. In the UI, the **Excavate** tab does the same with the stratigraphic
 card design.
 
+> **Real AI (free, recommended for the video).** The default is a deterministic
+> $0 mock. For genuinely semantic search + real grounded summaries, copy
+> `.env.example` → `.env`, uncomment the **Gemini (free)** block (set
+> `FOSSILRAG_OPENAI_API_KEY`), then `make down && make up-ui`. Now `/excavate`
+> ranks by meaning and `/mutate` + `/chat` return real Claude/Gemini answers —
+> still $0. (Swapping the embedder changes the vector space, hence `make down`
+> to start with a fresh index.)
+
 ## 2. Mutate + Prompt Fossilization (mutation)
 
 ```bash
@@ -75,11 +83,16 @@ UI **Dataset** tab (or `POST /dataset`): build JSONL instruction/response pairs
 
 ```bash
 export LOCALSTACK_AUTH_TOKEN=...            # free for students/OSS
-make up-aws                                  # + LocalStack + bootstrap + worker
-make demo                                    # upload→S3→SQS→worker→silver, then
+FOSSILRAG_WORKER_INDEX=true make up-aws      # + LocalStack + bootstrap + worker
+make demo                                    # upload→S3→SQS→worker→(silver + INDEX), then
                                              # re-upload to prove self-healing idempotency
+# the uploaded docs are now searchable via the API — the pipeline is end-to-end:
+curl 'localhost:8000/excavate?q=fossilised+theropod+eggs&k=3'
 ```
-`make demo` shows the decoupled loop and that a re-drop is a no-op (silver
+With `FOSSILRAG_WORKER_INDEX=true` the worker runs the full pipeline per object
+(extract→chunk→embed→**upsert into pgvector**), so a raw S3 drop becomes
+**searchable** — the automated-enrichment use case, end to end. `make demo` also
+shows the decoupled loop's self-healing idempotency: a re-drop is a no-op (silver
 `LastModified` frozen; the DynamoDB ledger reports it already processed).
 
 ## 9. Live-ready cloud (Component 5)
