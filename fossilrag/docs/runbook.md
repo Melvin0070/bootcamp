@@ -1,7 +1,8 @@
 # FossilRAG — Runbook
 
-Operational guide. Grows with each PR; currently covers the retrieval API
-(PR0) and the serverless ingestion pipeline (PR1).
+Operational guide for the full shipped system: the SQS-driven ingestion
+pipeline (worker + DLQ), the retrieval / embedding / mutation API, and
+observability (metrics, alarms, dashboard).
 
 ## Components & triggers
 
@@ -32,8 +33,8 @@ also read unprefixed). See `.env.example`.
   Self-Healing Idempotency mutation, PR3.)
 - **Failure handling.** A per-record extraction failure (corrupt/unsupported
   body) is normalised to a `ValueError`, collected, and the invocation
-  re-raises at the end so the platform retries and — once PR10 lands — routes
-  exhausted retries to an SQS DLQ. A *structurally malformed* event record
+  re-raises at the end so the platform retries and routes exhausted retries to
+  an SQS DLQ (`infra/sqs.tf` redrive, `maxReceiveCount=5`). A *structurally malformed* event record
   (missing bucket/key) is logged and skipped (retry can't fix it).
 
 ## Common procedures
@@ -54,7 +55,8 @@ also read unprefixed). See `.env.example`.
 
 ## Local development
 
-- API + pgvector: `make up`, then `make seed` / `curl /excavate`. `make down`.
+- API + pgvector: `pip install -e .` (so `make seed` can import `fossilrag`),
+  `make up`, then `make seed` / `curl /excavate`. `make down`.
 - AWS-service behaviour is exercised in tests via **moto** (`$0`, no account).
   The compose demo (PR12) uses **LocalStack** for S3/DynamoDB/SQS — note its
   free tier needs a `LOCALSTACK_AUTH_TOKEN` and is non-commercial.
@@ -63,4 +65,6 @@ also read unprefixed). See `.env.example`.
 ## Health & observability
 
 - `GET /healthz` — pool + store readiness. Structured `event=...` logs
-  throughout. CloudWatch EMF metrics + dashboards arrive in PR14.
+  throughout, with a per-request correlation id (`X-Request-ID`) + CloudWatch
+  EMF metrics and alarms/dashboard (`infra/monitoring.tf`; see
+  [`observability.md`](observability.md)).

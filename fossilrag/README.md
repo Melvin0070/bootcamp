@@ -21,6 +21,7 @@ green.
 
 ```bash
 cd fossilrag
+pip install -e .              # so host-run scripts (seed) can import fossilrag
 make up                       # build + start postgres(pgvector) + api
 python -m scripts.seed        # ingest the sample fossils
 curl 'localhost:8000/excavate?q=late+cretaceous+apex+predator&k=3'
@@ -59,8 +60,8 @@ make e2e                      # up -> ingest -> excavate -> assert -> down
 `/mutate` defaults to a deterministic mock LLM (`mock: true`) so the full
 surface is callable at $0; set `FOSSILRAG_LLM_PROVIDER=bedrock` for a real
 Claude summary. Optional API-key auth: set `FOSSILRAG_API_KEY` (off by default
-for local/demo). Every endpoint is also surfaced in the **React UI**
-(`make up-ui` → http://localhost:5173).
+for local/demo). Nearly every endpoint is surfaced in the **React UI** (all but
+the read-only `GET /markers`) — `make up-ui` → http://localhost:5173.
 
 ---
 

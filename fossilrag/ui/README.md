@@ -18,8 +18,9 @@ Mono, amber-on-sediment).
 ## Tabs
 
 Excavate · Mutate · Chat · Fossil Layers (time-travel + diff) · Slide Mutator ·
-Dataset · Enrich · Ingest — covering all 12 API endpoints (every use case + the
-mutations).
+Dataset · Enrich · Ingest — every use case + mutation, wiring 9 of the 10
+functional endpoints across 8 tabs (all but the read-only `GET /markers`, whose
+record the Enrich tab already shows inline from the `/enrich` response).
 
 ## Contract safety
 

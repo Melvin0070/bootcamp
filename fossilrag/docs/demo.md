@@ -7,7 +7,8 @@ the UI, and the emulated serverless ingestion loop. Everything here runs at $0.
 
 ```bash
 cd fossilrag
-make up-ui            # postgres(pgvector) + API + the React UI (nginx)
+pip install -e .     # so host-run scripts (seed) can import fossilrag
+make up-ui           # postgres(pgvector) + API + the React UI (nginx)
 # API  → http://localhost:8000   UI → http://localhost:5173
 ```
 

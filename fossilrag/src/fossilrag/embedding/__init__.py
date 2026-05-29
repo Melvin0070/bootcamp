@@ -36,9 +36,10 @@ def make_embedder(settings=None):  # noqa: ANN001, ANN201
     if provider == "bedrock":
         from fossilrag.embedding.bedrock import DEFAULT_MODEL, BedrockEmbedder
 
-        model_id = (
-            model if model.startswith("amazon.") or model.startswith("cohere.") else DEFAULT_MODEL
-        )
+        # BedrockEmbedder speaks Titan v2's request/response shape only, so any
+        # non-Titan id falls back to the Titan default rather than silently
+        # sending a malformed request to e.g. a Cohere model.
+        model_id = model if model.startswith("amazon.") else DEFAULT_MODEL
         return BedrockEmbedder(
             model_id=model_id, dimensions=settings.embed_dim, region=settings.aws_region
         )

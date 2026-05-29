@@ -88,9 +88,11 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("FOSSILRAG_AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL"),
     )
-    # Medallion buckets. silver_bucket stays the worker's required output (no
-    # default — a missing value fails fast); raw/gold carry compose/LocalStack
-    # defaults so the local stack is provisionable from env alone.
+    # Medallion buckets. silver_bucket defaults to None (unset sentinel) and is
+    # the worker's required output: the SQS/ingest handlers raise RuntimeError
+    # if it's still unset at call time (aws.bootstrap.from_settings substitutes
+    # "fossilrag-silver" when None). raw/gold carry compose/LocalStack defaults
+    # so the local stack is provisionable from env alone.
     raw_bucket: str = "fossilrag-raw"
     silver_bucket: str | None = None
     gold_bucket: str = "fossilrag-gold"
