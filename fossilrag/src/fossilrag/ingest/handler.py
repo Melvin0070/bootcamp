@@ -6,7 +6,7 @@ worker instead — so this handler is currently **unwired**, kept as the
 synchronous alternative (wire it by pointing the notification at this Lambda
 rather than the queue). The per-object work is factored into
 :func:`ingest_s3_object` so the SQS worker reuses exactly the same extraction
-path, and both share the S3-event parser in :mod:`fossilrag.worker.events`.
+path, and both share the S3-event parser in :mod:`fossilrag.events`.
 
 Per-record *extraction* failures are collected and, if any occurred, re-raised
 at the end so the platform retries the invocation and routes exhausted retries

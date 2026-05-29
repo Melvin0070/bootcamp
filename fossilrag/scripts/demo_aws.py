@@ -36,9 +36,14 @@ DOCS: dict[str, str] = {
 }
 
 
-def _silver_keys(s3, bucket: str, prefix: str) -> set[str]:  # noqa: ANN001
+def _silver_objects(s3, bucket: str, prefix: str) -> dict:  # noqa: ANN001
+    """Map each silver object key → its S3 LastModified timestamp."""
     resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
-    return {o["Key"] for o in resp.get("Contents", [])}
+    return {o["Key"]: o["LastModified"] for o in resp.get("Contents", [])}
+
+
+def _silver_keys(s3, bucket: str, prefix: str) -> set[str]:  # noqa: ANN001
+    return set(_silver_objects(s3, bucket, prefix))
 
 
 def _wait_for_silver(s3, bucket: str, prefix: str, want: int, attempts: int = 30) -> set[str]:  # noqa: ANN001
@@ -74,15 +79,27 @@ def main() -> None:
         f"  sample silver record ({len(sample)} bytes): {sample[:120].decode('utf-8', 'replace')}…"
     )
 
+    # Capture LastModified BEFORE the re-drop. This is the discriminating signal:
+    # the silver key is content-addressed, so re-uploading identical bytes leaves
+    # the key SET unchanged whether or not the ledger skips — but if the worker
+    # actually skips (idempotency working) it makes zero S3 writes, so silver
+    # LastModified is FROZEN. If the ledger were off, the worker would overwrite
+    # silver and LastModified would advance. So unchanged timestamps prove the skip.
+    before = _silver_objects(s3, names.silver_bucket, settings.silver_prefix)
+
     print("\n→ re-uploading the SAME objects to exercise self-healing idempotency")
     for key, text in DOCS.items():
         s3.put_object(
             Bucket=names.raw_bucket, Key=key, Body=text.encode("utf-8"), ContentType="text/plain"
         )
     time.sleep(6)  # let the worker drain + skip the redelivered events
-    after = _silver_keys(s3, names.silver_bucket, settings.silver_prefix)
-    assert after == silver, f"idempotency broken: silver changed {silver} -> {after}"
-    print(f"✓ no new silver writes — still {len(after)} objects (redeliveries were no-ops)")
+    after = _silver_objects(s3, names.silver_bucket, settings.silver_prefix)
+    assert set(after) == silver, f"idempotency broken: silver keys changed {silver} -> {set(after)}"
+    unchanged = {k: after[k] for k in before} == before
+    assert unchanged, "idempotency broken: silver was re-written (LastModified advanced on re-drop)"
+    print(
+        f"✓ no new silver writes — still {len(after)} objects, LastModified frozen (worker skipped)"
+    )
 
     if settings.idempotency_backend == "dynamodb" and settings.idempotency_table:
         from fossilrag.idempotency import DynamoDBStore

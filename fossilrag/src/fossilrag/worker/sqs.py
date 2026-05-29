@@ -3,7 +3,7 @@
 Decouples ingestion from S3 events for burst absorption: the raw bucket's
 ``s3:ObjectCreated:*`` notification fans into the queue (Terraform, PR11) and
 this worker drains it. Message bodies are parsed by
-:mod:`fossilrag.worker.events`, which accepts both the S3-event-notification
+:mod:`fossilrag.events`, which accepts both the S3-event-notification
 shape S3 actually sends *and* a direct ``{"bucket","key"}`` producer task (and
 skips S3's one-off ``s3:TestEvent``). It returns ``batchItemFailures`` so SQS
 retries ONLY the failed messages (and DLQs them after maxReceiveCount) rather
