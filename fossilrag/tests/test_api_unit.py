@@ -69,3 +69,10 @@ def test_ingest_request_defaults():
     req = IngestRequest(filename="a.txt", text="hello")
     assert req.layer_version == 1
     assert req.content_type == "text/plain"
+
+
+def test_asgi_lambda_handler_builds():
+    pytest.importorskip("mangum")
+    from fossilrag.api.asgi import handler  # Mangum(app) — the API Lambda entrypoint
+
+    assert callable(handler)

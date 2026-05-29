@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars and adjust. `terraform plan` / `apply` use these.
+aws_region  = "us-east-1"
+environment = "dev"
+name_prefix = "fossilrag" # keep short: AOSS collection name <= 32 chars
+
+# Embedding dim for the AOSS knn_vector field (Titan v2: 256 | 512 | 1024).
+embed_dim = 1024
+
+api_provisioned_concurrency = 2
+api_max_concurrency         = 20
+log_retention_days          = 14

@@ -99,10 +99,28 @@ jobs:
         if: always()
         run: docker compose down -v
 
+  terraform:
+    name: terraform (fmt + validate)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fossilrag/infra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.8'
+      - name: fmt
+        run: terraform fmt -check -recursive
+      - name: init (no backend, no creds)
+        run: terraform init -backend=false
+      - name: validate
+        run: terraform validate
+
   ci-passed:
     name: ci-passed
     runs-on: ubuntu-latest
-    needs: [lint, test, compose-e2e]
+    needs: [lint, test, compose-e2e, terraform]
     if: always()
     defaults:
       run:
@@ -112,8 +130,9 @@ jobs:
         run: |
           if [[ "${{ needs.lint.result }}" != "success" ]] \
              || [[ "${{ needs.test.result }}" != "success" ]] \
-             || [[ "${{ needs.compose-e2e.result }}" != "success" ]]; then
-            echo "::error::a required job failed (lint=${{ needs.lint.result }}, test=${{ needs.test.result }}, compose-e2e=${{ needs.compose-e2e.result }})"
+             || [[ "${{ needs.compose-e2e.result }}" != "success" ]] \
+             || [[ "${{ needs.terraform.result }}" != "success" ]]; then
+            echo "::error::a required job failed (lint=${{ needs.lint.result }}, test=${{ needs.test.result }}, compose-e2e=${{ needs.compose-e2e.result }}, terraform=${{ needs.terraform.result }})"
             exit 1
           fi
           echo "ci_ok"
