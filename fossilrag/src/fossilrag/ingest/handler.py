@@ -1,21 +1,25 @@
 """AWS Lambda handler: S3 ObjectCreated → extract → silver.
 
-Wired to the raw bucket's ``s3:ObjectCreated:*`` notification (Terraform in
-PR11). The per-object work is factored into :func:`ingest_s3_object` so the SQS
-worker (PR10) reuses exactly the same extraction path.
+A *direct* S3-ObjectCreated entrypoint. The deployed topology (Terraform, PR11)
+routes the raw bucket through SQS to the resilient :mod:`fossilrag.worker.sqs`
+worker instead — so this handler is currently **unwired**, kept as the
+synchronous alternative (wire it by pointing the notification at this Lambda
+rather than the queue). The per-object work is factored into
+:func:`ingest_s3_object` so the SQS worker reuses exactly the same extraction
+path, and both share the S3-event parser in :mod:`fossilrag.events`.
 
 Per-record *extraction* failures are collected and, if any occurred, re-raised
-at the end so the platform retries the invocation and (PR10) routes exhausted
-retries to the DLQ. Structurally malformed event records (no bucket/key — not a
+at the end so the platform retries the invocation and routes exhausted retries
+to the DLQ. Structurally malformed event records (no bucket/key — not a
 document) are logged and skipped, since retrying them can never succeed.
 """
 
 from __future__ import annotations
 
-import urllib.parse
 from typing import Any
 
 from fossilrag.config import get_settings
+from fossilrag.events import pair_from_s3_record
 from fossilrag.ingest.extract import extract_document
 from fossilrag.ingest.storage import make_s3_client, read_object, write_silver
 from fossilrag.logging import configure_logging, get_logger
@@ -60,13 +64,11 @@ def handler(event: dict[str, Any], context: Any = None) -> dict[str, Any]:
     failures: list[dict[str, str]] = []
 
     for record in _records(event):
-        s3_info = record.get("s3", {})
-        src_bucket = s3_info.get("bucket", {}).get("name")
-        # S3 event keys are URL-encoded (spaces → '+', etc.).
-        key = urllib.parse.unquote_plus(s3_info.get("object", {}).get("key", ""))
-        if not src_bucket or not key:
+        pair = pair_from_s3_record(record)
+        if pair is None:
             log.warning("event=skip_malformed_record record=%r", record)
             continue
+        src_bucket, key = pair
         try:
             processed.append(
                 ingest_s3_object(
