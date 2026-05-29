@@ -1,10 +1,38 @@
-# Local end-to-end stack for the walking skeleton.
+# Local orchestration for FossilRAG (Component 6).
 #
-# PR0 needs only Postgres+pgvector and the API — no LocalStack (the AWS-backed
-# services arrive in later PRs, and LocalStack's free tier now requires an auth
-# token; see docs/adr/0001). `docker compose up` then `python -m scripts.smoke`
-# proves the spine over real HTTP. This same flow runs in CI (the compose-e2e
-# job), which is where it is verified — the dev box has no Docker.
+# Two layers, by design:
+#
+#   • DEFAULT  (`docker compose up`)  — the retrieval spine: Postgres+pgvector
+#     and the API. No token, no LocalStack. This is exactly the path CI's
+#     compose-e2e job builds and smoke-tests, so it must stay self-contained.
+#
+#   • `aws` PROFILE  (`docker compose --profile aws up`) — the full emulated
+#     serverless stack: LocalStack (S3+SQS+DynamoDB) + a one-shot `bootstrap`
+#     that provisions the same topology Terraform deploys (infra/) + a `worker`
+#     that drains the ingest queue into silver. Demonstrates the decoupled
+#     ingestion loop end-to-end at $0.
+#
+# Why a profile, not the default: since LocalStack 2026.03 even the free tier
+# needs an account token (LOCALSTACK_AUTH_TOKEN), so it can't run unattended in
+# CI — the worker/poller/bootstrap logic is covered by moto instead (see
+# tests/). The `aws` profile is the manual, locally-runnable demo.
+
+x-aws-env: &aws-env
+  # boto3 honours AWS_ENDPOINT_URL globally → S3 + SQS + DynamoDB all hit LocalStack.
+  AWS_ENDPOINT_URL: http://localstack:4566
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  AWS_REGION: us-east-1
+  AWS_DEFAULT_REGION: us-east-1
+  FOSSILRAG_RAW_BUCKET: fossilrag-raw
+  FOSSILRAG_SILVER_BUCKET: fossilrag-silver
+  FOSSILRAG_GOLD_BUCKET: fossilrag-gold
+  FOSSILRAG_INGEST_QUEUE: fossilrag-ingest
+  FOSSILRAG_INGEST_DLQ: fossilrag-ingest-dlq
+  FOSSILRAG_IDEMPOTENCY_BACKEND: dynamodb
+  FOSSILRAG_IDEMPOTENCY_TABLE: fossilrag-idempotency
+  FOSSILRAG_PROMPT_CACHE_TABLE: fossilrag-prompt-cache
+  FOSSILRAG_LOG_LEVEL: INFO
 
 services:
   postgres:
@@ -37,6 +65,48 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  # ---- `aws` profile: emulated serverless ingestion loop -------------------
+  localstack:
+    image: ${LOCALSTACK_IMAGE:-localstack/localstack:latest}
+    profiles: ["aws"]
+    environment:
+      SERVICES: s3,sqs,dynamodb
+      DEBUG: ${LOCALSTACK_DEBUG:-0}
+      # Required since LocalStack 2026.03 (free for students/OSS). Left blank so
+      # `docker compose config` validates without it; set it before `up`.
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:-}
+    ports:
+      - "4566:4566"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  bootstrap:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    profiles: ["aws"]
+    command: ["python", "-m", "scripts.localstack_init"]
+    environment: *aws-env
+    depends_on:
+      localstack:
+        condition: service_healthy
+    restart: "no"
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    profiles: ["aws"]
+    command: ["python", "-m", "scripts.worker"]
+    environment: *aws-env
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
 volumes:
   pgdata:

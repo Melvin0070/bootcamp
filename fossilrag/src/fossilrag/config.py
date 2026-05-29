@@ -88,12 +88,23 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("FOSSILRAG_AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL"),
     )
+    # Medallion buckets. silver_bucket stays the worker's required output (no
+    # default — a missing value fails fast); raw/gold carry compose/LocalStack
+    # defaults so the local stack is provisionable from env alone.
+    raw_bucket: str = "fossilrag-raw"
     silver_bucket: str | None = None
+    gold_bucket: str = "fossilrag-gold"
     silver_prefix: str = "silver"
 
     # --- SQS worker (Auto-Scaling Lambda + DLQ mutation) -----------------
+    ingest_queue: str = "fossilrag-ingest"
+    ingest_dlq: str = "fossilrag-ingest-dlq"
+    sqs_max_receive_count: int = Field(default=5, ge=1)  # redrive -> DLQ after N
     sqs_max_attempts: int = Field(default=3, ge=1)
     sqs_base_delay: float = Field(default=0.1, ge=0.0)  # 0 disables backoff sleeps
+    # Long-poll window + per-receive batch the local poller uses.
+    sqs_wait_seconds: int = Field(default=10, ge=0, le=20)
+    sqs_max_messages: int = Field(default=10, ge=1, le=10)
 
     # --- Idempotency (Self-Healing Idempotency mutation) -----------------
     idempotency_backend: str = "null"  # null | local | dynamodb
