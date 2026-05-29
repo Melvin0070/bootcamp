@@ -58,8 +58,9 @@ make e2e                      # up -> ingest -> excavate -> assert -> down
 
 `/mutate` defaults to a deterministic mock LLM (`mock: true`) so the full
 surface is callable at $0; set `FOSSILRAG_LLM_PROVIDER=bedrock` for a real
-Claude summary. The `/dataset` (Fine-Tuning Dataset Builder) endpoint arrives
-in PR9.
+Claude summary. Optional API-key auth: set `FOSSILRAG_API_KEY` (off by default
+for local/demo). Every endpoint is also surfaced in the **React UI**
+(`make up-ui` → http://localhost:5173).
 
 ---
 
@@ -83,8 +84,9 @@ in PR9.
   **Bedrock Titan v2** (1024-dim) as the cloud default. Indexes are keyed by
   `(model_id, dim)` and never cross-queried — vectors from different models are
   incomparable even at equal dimensions.
-- **Vector store is pluggable**: **pgvector** (primary, tested + demoed),
-  **FAISS** (unit alternate), **OpenSearch Serverless** (cloud-native, IaC-validated).
+- **Vector store is behind one interface**: **pgvector** is the shipped backend
+  (tested + demoed). **OpenSearch Serverless** is IaC-provisioned (cloud-native
+  option), not yet bound behind the interface — the documented next step.
 - See [`docs/architecture.md`](docs/architecture.md) and the decision record
   [`docs/adr/0001-foundational-decisions.md`](docs/adr/0001-foundational-decisions.md).
 
@@ -116,11 +118,11 @@ FossilRAG implements **all three** brief use cases as one composed system, and
 | 8  | ✅ | **PPTX Slide Mutator** (`/slide/mutate`): edit suggestion + diff + version tracking (new fossil layer) |
 | 9  | ✅ | **Fine-Tuning Dataset Builder** (`/dataset`): JSONL instruction/response pairs from gold fossils |
 | 10 | ✅ | **Auto-Scaling Lambda + DLQ**: SQS worker (partial-batch-failure, retry/backoff, idempotent) + DLQ handler |
-| 11 | ⬜ | Terraform IaC (live-deploy-ready) |
-| 12 | ⬜ | Full compose stack (LocalStack + workers + UI) |
-| 13 | ⬜ | React Fossil UI |
-| 14 | ⬜ | Observability + security hardening |
-| 15 | ⬜ | Docs + demo polish |
+| 11 | ✅ | **Terraform IaC** — S3/SQS/DynamoDB/Lambda/API-GW/AOSS, autoscaling, DLQ redrive, lifecycle; `validate`-clean, one-`apply` live |
+| 12 | ✅ | **Full compose stack** — LocalStack ingestion loop (`aws` profile) + worker poller; profile-gated, moto-tested |
+| 13 | ✅ | **React Fossil UI** — 8-tab Excavation Console (Bun/Vite/React 19/Biome/Vitest), OpenAPI-typed, nginx + `/api` proxy |
+| 14 | ✅ | **Observability + security** — EMF metrics + correlation ids + CloudWatch alarms/dashboard; optional API-key auth, CSP, scoped IAM, bandit/gitleaks/pip-audit CI |
+| 15 | ✅ | **Docs + demo polish** — architecture diagram, runbook, cost, threat model, demo script, load test, rubric self-check |
 
 ---
 
@@ -131,4 +133,22 @@ make install     # pip install -e ".[dev]"
 make lint        # ruff check + format check
 make test-unit   # unit tests (no DB)
 make test        # full suite (needs DATABASE_URL; runs in CI)
+make up-ui       # postgres + api + React UI (http://localhost:5173)
+make loadtest    # latency percentiles + throughput on /excavate
 ```
+
+---
+
+## Docs
+
+| Doc | What |
+|-----|------|
+| [`docs/architecture.md`](docs/architecture.md) | Topology diagram, medallion data flow, interfaces |
+| [`docs/rubric.md`](docs/rubric.md) | Deliverable & rubric self-check (components · 3 use cases · 7 mutations) |
+| [`docs/demo.md`](docs/demo.md) | ~6-min demo walkthrough (all use cases + UI + the AWS loop) |
+| [`docs/runbook.md`](docs/runbook.md) | Deploy / operate / DLQ redrive / secret rotation |
+| [`docs/observability.md`](docs/observability.md) | Logs · EMF metrics · X-Ray · alarms + dashboard |
+| [`docs/threat-model.md`](docs/threat-model.md) | STRIDE threat model + mitigations |
+| [`docs/cost-notes.md`](docs/cost-notes.md) | Cost posture + optimisations |
+| [`docs/adr/0001-foundational-decisions.md`](docs/adr/0001-foundational-decisions.md) | Dated decision record |
+| [`infra/README.md`](infra/README.md) · [`docker/README.md`](docker/README.md) · [`ui/README.md`](ui/README.md) | Component-level guides |

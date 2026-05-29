@@ -41,6 +41,9 @@ seed:  ## ingest the sample documents through the running stack
 smoke:  ## end-to-end HTTP smoke test against a running API (retrieval half)
 	python -m scripts.smoke
 
+loadtest:  ## concurrent load test on /excavate → latency percentiles + throughput
+	python -m scripts.loadtest $(API_URL)
+
 demo:  ## run the S3->SQS->worker->silver ingestion demo (needs up-aws)
 	docker compose --profile aws run --rm worker python -m scripts.demo_aws
 
