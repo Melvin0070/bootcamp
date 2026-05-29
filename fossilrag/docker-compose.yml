@@ -108,5 +108,21 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # ---- `ui` profile: React Fossil UI (mutation #7) -------------------------
+  # nginx serves the built SPA and reverse-proxies /api -> the api service, so
+  # the browser is same-origin (no CORS). Profiled so the default `up` (and CI's
+  # compose-e2e) stay the lean spine; the UI is verified by its own `ui` CI job.
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    profiles: ["ui"]
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:
