@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -78,3 +79,31 @@ def test_security_headers_present():
     for header in SECURITY_HEADERS:
         assert header in r.headers
     assert r.headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_unmatched_path_metric_collapses_to_sentinel(caplog):
+    # A 404 on an arbitrary path must NOT mint a per-URL custom metric; it maps
+    # to the bounded "<unmatched>" bucket (route template, not the raw path).
+    client = TestClient(_mini_app())
+    with caplog.at_level(logging.INFO):
+        r = client.get("/no/such/route")
+    assert r.status_code == 404
+    # The EMF metric's Endpoint dimension is the sentinel, not the raw URL.
+    assert '"Endpoint":"<unmatched>"' in caplog.text
+
+
+def test_error_path_is_recorded_then_reraised(caplog):
+    app = FastAPI()
+    app.add_middleware(RequestContextMiddleware)
+
+    @app.get("/boom")
+    def boom() -> dict:
+        raise ValueError("kaboom")
+
+    client = TestClient(app, raise_server_exceptions=False)
+    with caplog.at_level(logging.INFO):
+        r = client.get("/boom")
+    assert r.status_code == 500
+    # The failure still produced an access log line (status=500), not silence.
+    assert "event=http_request" in caplog.text
+    assert "status=500" in caplog.text

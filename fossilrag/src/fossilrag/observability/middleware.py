@@ -2,14 +2,17 @@
 
 One ASGI middleware gives every request:
   * a correlation id (inbound ``X-Request-ID`` honoured, else generated) bound
-    to a context var and echoed on the response,
+    to a context var, echoed on the response, and stamped on the access log line,
   * baseline security response headers,
   * a structured access log line, and
-  * an EMF latency + count metric dimensioned by endpoint (so all routes get
-    CloudWatch metrics with zero per-handler code).
+  * an EMF latency + count metric dimensioned by the matched **route template**
+    (so all routes get CloudWatch metrics with zero per-handler code).
 
-Liveness/root paths are excluded from metrics so the compose healthcheck poll
-doesn't flood the metric stream.
+The metric dimension is the route *template*, never the raw path, so arbitrary
+404 URLs (scanners, typos) collapse to one ``<unmatched>`` bucket instead of
+minting an unbounded number of custom metrics. Liveness/root paths are excluded
+from metrics so the compose healthcheck poll doesn't flood the metric stream.
+The error path is recorded too, so a 500 still produces an access log + metric.
 """
 
 from __future__ import annotations
@@ -42,11 +45,23 @@ SECURITY_HEADERS = {
 }
 
 _NO_METRIC_PATHS = {"/", "/healthz"}
+_UNMATCHED = "<unmatched>"
 
 
 def current_request_id() -> str:
     """The current request's correlation id (``-`` outside a request)."""
     return _request_id.get()
+
+
+def _route_template(request: Request) -> str:
+    """The matched route's path template, or a sentinel for unmatched (404) paths.
+
+    Keying metrics on the template (e.g. ``/excavate``) rather than the raw URL
+    keeps custom-metric cardinality bounded — junk/scanner paths all map to one
+    ``<unmatched>`` series.
+    """
+    route = request.scope.get("route")
+    return getattr(route, "path", None) or _UNMATCHED
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -56,6 +71,11 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         start = time.perf_counter()
         try:
             response = await call_next(request)
+        except Exception:
+            # Record the failure too (the case observability matters most), then
+            # re-raise so Starlette's error handler produces the 500.
+            self._record(request, rid, 500, (time.perf_counter() - start) * 1000)
+            raise
         finally:
             _request_id.reset(token)
 
@@ -63,24 +83,29 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         response.headers[REQUEST_ID_HEADER] = rid
         for key, value in SECURITY_HEADERS.items():
             response.headers.setdefault(key, value)
+        self._record(request, rid, response.status_code, latency_ms)
+        return response
 
-        path = request.url.path
+    @staticmethod
+    def _record(request: Request, rid: str, status: int, latency_ms: float) -> None:
+        # Logs keep the real path (no cardinality limit); the metric uses the
+        # bounded route template.
         log.info(
             "event=http_request method=%s path=%s status=%d request_id=%s latency_ms=%.2f",
             request.method,
-            path,
-            response.status_code,
+            request.url.path,
+            status,
             rid,
             latency_ms,
         )
-        if path not in _NO_METRIC_PATHS:
+        endpoint = _route_template(request)
+        if endpoint not in _NO_METRIC_PATHS:
             emit_metric(
                 "RequestLatencyMs",
                 round(latency_ms, 2),
                 unit="Milliseconds",
-                dimensions={"Service": "fossilrag", "Endpoint": path},
+                dimensions={"Service": "fossilrag", "Endpoint": endpoint},
                 request_id=rid,
-                status=response.status_code,
+                status=status,
                 method=request.method,
             )
-        return response

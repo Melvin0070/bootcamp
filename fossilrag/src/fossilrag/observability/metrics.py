@@ -12,6 +12,7 @@ shape is unit-tested without touching the clock or stdout.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 from typing import Any
@@ -80,6 +81,8 @@ def emit_metric(
         properties=properties or None,
         timestamp_ms=int(time.time() * 1000),
     )
-    # One compact JSON line — CloudWatch extracts the metric from it.
-    log.info(json.dumps(doc, separators=(",", ":")))
+    # One compact JSON line — CloudWatch extracts the metric from it. A metric
+    # must never break the request path, so emission is fail-open.
+    with contextlib.suppress(Exception):
+        log.info(json.dumps(doc, separators=(",", ":")))
     return doc
