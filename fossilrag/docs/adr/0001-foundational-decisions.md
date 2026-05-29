@@ -11,7 +11,7 @@
 |---|----------|-----|
 | 1 | **Hybrid AWS target**: build + test at $0 (LocalStack/moto + mock + pgvector); ship a turnkey, `plan`-validated Terraform stack | User needs it live-capable but cannot incur dev cost |
 | 2 | **Pluggable AI providers, mock by default**; AWS Bedrock as the cloud default | $0 CI/tests with no keys; serverless-native in cloud |
-| 3 | **pgvector is the primary, tested vector store**; FAISS + OpenSearch Serverless are interface-compatible alternates | One $0-verifiable backend; don't pay 3× test surface for one demo |
+| 3 | **pgvector is the only shipped vector store**; OpenSearch Serverless is IaC-provisioned but not yet bound (FAISS a not-yet-built candidate) | One $0-verifiable backend; don't pay 3× test surface for one demo |
 | 4 | **Walking-skeleton-first** delivery; one stage deepened per PR | `main` always demoable; autonomous merges stay safe |
 | 5 | **Indexes keyed by `(model_id, dim)`**, never cross-queried | Vectors from different models are incomparable even at equal dims |
 
@@ -66,7 +66,8 @@ embeddings user-guide pages; sentence-transformers 5.5.x docs.
   recall via `hnsw.ef_search` (≥ top-k). Register the pgvector asyncpg codec on
   pool `init` so numpy float32 arrays bind directly. Indexed `vector` caps at
   2000 dims (1024 is fine; `halfvec` only needed beyond that).
-- **FAISS** (`faiss-cpu`) — lightweight in-process unit-test alternate.
+- **FAISS** — a candidate lightweight in-process backend; **not yet implemented**
+  (pgvector is the only shipped/tested store).
 - **OpenSearch Serverless** — cloud-native option: `VECTORSEARCH` collection,
   Faiss HNSW, three policies (encryption object + network/data arrays) with
   `depends_on`; **no custom doc IDs** on vector collections. AWS provider

@@ -15,8 +15,8 @@ keywords = ["rag", "serverless", "embeddings", "pgvector", "bedrock", "fastapi"]
 # Runtime dependencies. Versions are floors pinned to the latest stable
 # observed 2026-05 (see docs/adr/0001-foundational-decisions.md for the
 # research that fixed these). Heavy/optional backends (sentence-transformers,
-# boto3, faiss, opensearch-py) are pulled in via extras so the core API image
-# stays small and Lambda-friendly.
+# boto3, opensearch-py) are pulled in via extras so the core API image stays
+# small and Lambda-friendly.
 dependencies = [
     "fastapi>=0.136",
     "uvicorn[standard]>=0.34",
@@ -34,8 +34,8 @@ local-embeddings = ["sentence-transformers>=5.5"]
 # AWS cloud backends (Bedrock LLM + Titan embeddings, DynamoDB, S3, SQS) +
 # the Mangum ASGI→Lambda adapter for the API behind API Gateway.
 aws = ["boto3>=1.43", "mangum>=0.18"]
-# Alternate vector backends.
-faiss = ["faiss-cpu>=1.9"]
+# Cloud-native vector backend (the documented next step; not yet bound — an
+# OpenSearchStore impl is TODO, so the dep is here for that work, not yet used).
 opensearch = ["opensearch-py>=2.6", "boto3>=1.43"]
 # Document extraction (deepened in PR1).
 extract = ["pypdf>=6.0", "python-pptx>=1.0.2"]

@@ -1,7 +1,7 @@
 # FossilRAG — Cost Notes
 
-How the design keeps spend low, and where the real costs land in a live deploy.
-Grows per PR; currently covers ingestion (PR1) + the retrieval/embedding path.
+How the design keeps spend low, and where the real costs land in a live deploy
+of the full system (ingestion + retrieval/embedding/mutation + observability).
 
 ## Dev / CI: $0 by design
 

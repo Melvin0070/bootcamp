@@ -28,7 +28,10 @@ one stage with `main` always demoable) — this describes the shipped system.
 | vector | `embedding` (mock/local/Bedrock) + `vectorstore` | `(model_id, dim)` index | pluggable embedder; DynamoDB idempotency skip; pgvector |
 | served | `api` (+ `llm`, `enrichment`, `dataset`) | hits, summaries, layers, diffs, markers, chat, edits, datasets | `/excavate`; `/mutate`; `/timetravel`; `/diff`; `/enrich`+`/markers`; `/chat`; `/slide/mutate`; `/dataset` (JSONL fine-tune pairs) |
 
-## Serverless topology (deployed)
+## Serverless topology (target)
+
+> The Bedrock + OpenSearch Serverless nodes are IaC-validated, not deployed (see
+> the honesty posture above); pgvector is the live vector backend.
 
 ```mermaid
 flowchart LR
@@ -93,7 +96,7 @@ flowchart LR
 |---------|-----------|-----|--------------|
 | Vector store | pgvector (compose) | pgvector service container | RDS/Aurora pgvector (AOSS provisioned, binding TBD) |
 | Embedder | mock / local | mock | Bedrock Titan v2 |
-| LLM (`/mutate`) | mock / Ollama | mock | Bedrock Claude (Converse) |
+| LLM (`/mutate`) | mock / anthropic | mock | Bedrock Claude (Converse) |
 | AWS services | moto (tests) / LocalStack (demo) | moto | real AWS |
 | e2e | (no Docker on dev box) | `docker compose up` + smoke | — |
 
