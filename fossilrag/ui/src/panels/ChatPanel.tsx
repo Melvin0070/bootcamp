@@ -21,7 +21,13 @@ export function ChatPanel() {
     setMessages(next);
     setDraft("");
     const reply = await chat.run({ messages: next, k: 5, source_id: sourceId.trim() || null });
-    if (reply) setMessages([...next, { role: "assistant", content: reply.answer }]);
+    if (reply) {
+      setMessages([...next, { role: "assistant", content: reply.answer }]);
+    } else {
+      // Failed turn → restore the draft so it can be re-sent (the user turn
+      // stays in the transcript above the error, but the text isn't lost).
+      setDraft(content);
+    }
   };
 
   return (
@@ -86,7 +92,6 @@ export function ChatPanel() {
             value={sourceId}
             onChange={(e) => setSourceId(e.target.value)}
             placeholder="scope to one document"
-            aria-label="Source id"
           />
         </label>
         <button type="submit" disabled={chat.status === "loading" || !draft.trim()}>

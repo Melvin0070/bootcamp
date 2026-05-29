@@ -54,11 +54,7 @@ export function SlideMutatePanel() {
           </label>
           <label className="field">
             <span>Source id (optional)</span>
-            <input
-              value={sourceId}
-              onChange={(e) => setSourceId(e.target.value)}
-              aria-label="Source id"
-            />
+            <input value={sourceId} onChange={(e) => setSourceId(e.target.value)} />
           </label>
           <label className="field field--check">
             <span>Persist</span>

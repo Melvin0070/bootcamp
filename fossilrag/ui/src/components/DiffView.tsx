@@ -11,11 +11,12 @@ export function DiffView({ diff }: { diff: string }) {
         if (line.startsWith("+") && !line.startsWith("+++")) cls = "diff__add";
         else if (line.startsWith("-") && !line.startsWith("---")) cls = "diff__del";
         else if (line.startsWith("@@")) cls = "diff__hunk";
+        // `.diff span { display: block }` provides the line break — no inner "\n"
+        // (which under white-space:pre would double-space every line).
         return (
           // biome-ignore lint/suspicious/noArrayIndexKey: diff lines are a stable ordered list
           <span key={i} className={cls}>
             {line}
-            {"\n"}
           </span>
         );
       })}

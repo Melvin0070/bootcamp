@@ -41,7 +41,6 @@ export function DatasetPanel() {
             value={version}
             onChange={(e) => setVersion(e.target.value)}
             placeholder="latest"
-            aria-label="Layer version"
           />
         </label>
         <label className="field">

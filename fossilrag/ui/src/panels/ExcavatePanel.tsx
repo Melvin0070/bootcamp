@@ -53,7 +53,6 @@ export function ExcavatePanel() {
             value={sourceId}
             onChange={(e) => setSourceId(e.target.value)}
             placeholder="scope to one document"
-            aria-label="Source id"
           />
         </label>
         <button type="submit" disabled={search.status === "loading" || !q.trim()}>

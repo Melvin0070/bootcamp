@@ -53,7 +53,6 @@ export function IngestPanel() {
               value={sourceId}
               onChange={(e) => setSourceId(e.target.value)}
               placeholder="defaults to filename"
-              aria-label="Source id"
             />
           </label>
           <label className="field field--narrow">

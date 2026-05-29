@@ -53,7 +53,6 @@ export function MutatePanel() {
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
             placeholder="e.g. summarise for a 10-year-old"
-            aria-label="Instruction"
           />
         </label>
         <button type="submit" disabled={mutate.status === "loading" || !query.trim()}>

@@ -27,12 +27,14 @@ describe("ChatPanel", () => {
     expect(screen.getByText("mock-llm-v1")).toBeInTheDocument();
   });
 
-  it("shows an alert when the turn fails", async () => {
+  it("shows an alert and restores the draft when the turn fails", async () => {
     mockFetchJson({ detail: "retrieval failed" }, false, 500);
     const user = userEvent.setup();
     render(<ChatPanel />);
     await user.type(screen.getByLabelText("Message"), "boom");
     await user.click(screen.getByRole("button", { name: /send/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/retrieval failed/i);
+    // The failed turn's text is restored so it can be re-sent (not lost).
+    expect(screen.getByLabelText("Message")).toHaveValue("boom");
   });
 });

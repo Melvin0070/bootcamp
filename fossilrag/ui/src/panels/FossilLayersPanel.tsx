@@ -9,13 +9,17 @@ import { useAsyncAction } from "../hooks/useAsyncAction";
 export function FossilLayersPanel() {
   const [sourceId, setSourceId] = useState("");
   const [version, setVersion] = useState<string>("");
-  const [fromV, setFromV] = useState(1);
-  const [toV, setToV] = useState(2);
+  // Held as strings so the fields stay clearable; an empty/invalid value falls
+  // back to a valid default on submit (never 0, which the API rejects with 422).
+  const [fromV, setFromV] = useState("1");
+  const [toV, setToV] = useState("2");
 
   const travel = useAsyncAction(api.timetravel);
   const diff = useAsyncAction(api.diff);
   const layer = travel.data;
-  const d = diff.data;
+  // Only show the diff if it belongs to the currently-displayed layer's source —
+  // otherwise switching sources would leave a stale diff under the new layer.
+  const d = diff.data && layer && diff.data.source_id === layer.source_id ? diff.data : undefined;
 
   const onTravel = (e: FormEvent) => {
     e.preventDefault();
@@ -23,9 +27,14 @@ export function FossilLayersPanel() {
     if (sid) travel.run(sid, version.trim() ? Number(version) : undefined);
   };
 
+  const onSourceChange = (value: string) => {
+    setSourceId(value);
+    diff.reset(); // a diff for the old source is meaningless once the id changes
+  };
+
   const onDiff = () => {
     const sid = sourceId.trim();
-    if (sid) diff.run(sid, fromV, toV);
+    if (sid) diff.run(sid, fromV.trim() ? Number(fromV) : 1, toV.trim() ? Number(toV) : 2);
   };
 
   return (
@@ -40,7 +49,7 @@ export function FossilLayersPanel() {
           <span>Source id</span>
           <input
             value={sourceId}
-            onChange={(e) => setSourceId(e.target.value)}
+            onChange={(e) => onSourceChange(e.target.value)}
             placeholder="the document's stable id"
             aria-label="Source id"
           />
@@ -53,7 +62,6 @@ export function FossilLayersPanel() {
             value={version}
             onChange={(e) => setVersion(e.target.value)}
             placeholder="latest"
-            aria-label="Layer version"
           />
         </label>
         <button type="submit" disabled={travel.status === "loading" || !sourceId.trim()}>
@@ -95,7 +103,7 @@ export function FossilLayersPanel() {
                   type="number"
                   min={1}
                   value={fromV}
-                  onChange={(e) => setFromV(Number(e.target.value))}
+                  onChange={(e) => setFromV(e.target.value)}
                   aria-label="From version"
                 />
               </label>
@@ -105,7 +113,7 @@ export function FossilLayersPanel() {
                   type="number"
                   min={1}
                   value={toV}
-                  onChange={(e) => setToV(Number(e.target.value))}
+                  onChange={(e) => setToV(e.target.value)}
                   aria-label="To version"
                 />
               </label>
@@ -122,7 +130,8 @@ export function FossilLayersPanel() {
                       {d.changed ? "changed" : "identical"}
                     </Badge>
                     <span className="meta">
-                      +{d.added_lines} −{d.removed_lines}
+                      {d.source_id} · v{d.from_version} → v{d.to_version} · +{d.added_lines} −
+                      {d.removed_lines}
                     </span>
                   </div>
                   <DiffView diff={d.unified_diff} />

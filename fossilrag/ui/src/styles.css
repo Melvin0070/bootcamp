@@ -21,7 +21,9 @@
   --bone: #ece0cc;
   --bone-dim: #cdbfa6;
   --clay: #a8967a;
-  --clay-dim: #7e6f59;
+  /* Lightened to clear WCAG AA (>=4.5:1) for the small label/meta text it
+     drives across the dark palette; was #7e6f59 (~3.7:1). */
+  --clay-dim: #968468;
 
   /* Accents */
   --amber: #e0a43b;
@@ -284,8 +286,10 @@ textarea {
 }
 input::placeholder,
 textarea::placeholder {
-  color: var(--clay-dim);
-  opacity: 0.7;
+  /* Full-opacity --clay clears AA against the input background — these
+     placeholders carry real default-behaviour hints ("latest", "defaults to…"). */
+  color: var(--clay);
+  opacity: 1;
 }
 input:focus,
 textarea:focus,

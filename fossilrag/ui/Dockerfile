@@ -1,6 +1,7 @@
 # Build the static SPA with Bun, serve it with nginx — which also reverse-proxies
 # /api to the FastAPI service, so the browser is always same-origin (no CORS).
-FROM oven/bun:1-alpine AS build
+# Pinned to the 1.3 line to match the CI `ui` job (oven-sh/setup-bun 1.3.14).
+FROM oven/bun:1.3-alpine AS build
 WORKDIR /app
 # Deps first (cache layer): lockfile-exact, no network drift.
 COPY package.json bun.lock ./

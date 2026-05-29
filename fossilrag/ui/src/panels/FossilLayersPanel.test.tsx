@@ -51,6 +51,34 @@ describe("FossilLayersPanel", () => {
     expect(screen.getByText("changed")).toBeInTheDocument();
   });
 
+  it("hides a stale diff after switching to a different source", async () => {
+    const TRAVEL_B: TimeTravelResponse = {
+      ...TRAVEL,
+      source_id: "other.txt",
+      chunks: [
+        { ...TRAVEL.chunks[0], source_id: "other.txt", content: "A different stratum entirely." },
+      ],
+    };
+    mockFetchSequence({ body: TRAVEL }, { body: DIFF }, { body: TRAVEL_B });
+    const user = userEvent.setup();
+    render(<FossilLayersPanel />);
+
+    await user.type(screen.getByLabelText("Source id"), "report.txt");
+    await user.click(screen.getByRole("button", { name: /time-travel/i }));
+    await screen.findByText(/second stratum/i);
+    await user.click(screen.getByRole("button", { name: /^diff$/i }));
+    expect(await screen.findByText(/newly excavated line/i)).toBeInTheDocument();
+
+    // Switch to a different source and time-travel: the diff for the OLD source
+    // must not linger under the new layer.
+    const source = screen.getByLabelText("Source id");
+    await user.clear(source);
+    await user.type(source, "other.txt");
+    await user.click(screen.getByRole("button", { name: /time-travel/i }));
+    expect(await screen.findByText(/different stratum entirely/i)).toBeInTheDocument();
+    expect(screen.queryByText(/newly excavated line/i)).not.toBeInTheDocument();
+  });
+
   it("surfaces a 404 for an unknown source", async () => {
     mockFetchSequence({ body: { detail: "no fossil layers" }, ok: false, status: 404 });
     const user = userEvent.setup();
