@@ -80,7 +80,7 @@ data "aws_iam_policy_document" "api" {
   statement {
     sid       = "AossDataPlane"
     actions   = ["aoss:APIAccessAll"]
-    resources = ["arn:aws:aoss:${var.aws_region}:${data.aws_caller_identity.current.account_id}:collection/*"]
+    resources = [aws_opensearchserverless_collection.vectors.arn]
   }
   statement {
     sid       = "DbSecret"

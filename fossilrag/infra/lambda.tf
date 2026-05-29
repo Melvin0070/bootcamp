@@ -123,11 +123,19 @@ resource "aws_lambda_alias" "api_live" {
   function_version = aws_lambda_function.api.version
 }
 
-# Warm baseline so cold starts don't hit the retrieval path...
+# Warm baseline so cold starts don't hit the retrieval path. This seeds the
+# autoscaling target's min_capacity; once target-tracking (below) raises PC
+# under load, IT owns the runtime value — so we must NOT let Terraform revert
+# it to the baseline on the next plan/apply (that would snap capacity back down
+# mid-load and defeat the autoscaler). ignore_changes hands ownership over.
 resource "aws_lambda_provisioned_concurrency_config" "api" {
   function_name                     = aws_lambda_function.api.function_name
   qualifier                         = aws_lambda_alias.api_live.name
   provisioned_concurrent_executions = var.api_provisioned_concurrency
+
+  lifecycle {
+    ignore_changes = [provisioned_concurrent_executions]
+  }
 }
 
 # ...and autoscale it under load (target-tracking on utilisation).
