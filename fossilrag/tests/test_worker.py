@@ -135,3 +135,45 @@ def test_sqs_handler_partial_batch_failure_and_idempotency(tmp_path):
             assert r2["batchItemFailures"] == [{"itemIdentifier": "m3"}]
             keys2 = {o["Key"] for o in s3.list_objects_v2(Bucket="silver").get("Contents", [])}
             assert keys2 == keys
+
+
+def test_sqs_handler_accepts_s3_event_notification_and_skips_test_event(tmp_path):
+    """The queue actually receives S3 event notifications (Terraform raw→SQS),
+    plus a one-off s3:TestEvent — the worker must handle both, not just the
+    direct {"bucket","key"} producer shape."""
+    pytest.importorskip("moto")
+    boto3 = pytest.importorskip("boto3")
+    from moto import mock_aws
+
+    from fossilrag.worker.sqs import sqs_handler
+
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="raw")
+        s3.create_bucket(Bucket="silver")
+        _put(s3, "reports/q3.txt", b"Quarterly fossil dig report.")
+
+        # What S3 → SQS actually delivers: an ObjectCreated notification...
+        s3_event = json.dumps(
+            {"Records": [{"s3": {"bucket": {"name": "raw"}, "object": {"key": "reports/q3.txt"}}}]}
+        )
+        # ...and the connectivity probe S3 sends once when the notification is set up.
+        test_event = json.dumps({"Service": "Amazon S3", "Event": "s3:TestEvent"})
+        event = {
+            "Records": [
+                {"messageId": "e1", "body": s3_event},
+                {"messageId": "t1", "body": test_event},
+            ]
+        }
+        with _env(
+            FOSSILRAG_SILVER_BUCKET="silver",
+            FOSSILRAG_IDEMPOTENCY_BACKEND="local",
+            FOSSILRAG_IDEMPOTENCY_MANIFEST_PATH=str(tmp_path / "idem.json"),
+            FOSSILRAG_SQS_BASE_DELAY="0",
+            AWS_ENDPOINT_URL=None,
+        ):
+            r = sqs_handler(event)
+            # Both messages succeed (TestEvent is a no-op skip, not a failure).
+            assert r["batchItemFailures"] == []
+            keys = {o["Key"] for o in s3.list_objects_v2(Bucket="silver").get("Contents", [])}
+            assert len(keys) == 1  # the S3-event object landed in silver
