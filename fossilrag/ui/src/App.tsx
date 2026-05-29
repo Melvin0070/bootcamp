@@ -1,5 +1,12 @@
 import { useState } from "react";
+import { ChatPanel } from "./panels/ChatPanel";
+import { DatasetPanel } from "./panels/DatasetPanel";
+import { EnrichPanel } from "./panels/EnrichPanel";
 import { ExcavatePanel } from "./panels/ExcavatePanel";
+import { FossilLayersPanel } from "./panels/FossilLayersPanel";
+import { IngestPanel } from "./panels/IngestPanel";
+import { MutatePanel } from "./panels/MutatePanel";
+import { SlideMutatePanel } from "./panels/SlideMutatePanel";
 
 interface Tab {
   id: string;
@@ -7,7 +14,16 @@ interface Tab {
   render: () => React.ReactNode;
 }
 
-const TABS: Tab[] = [{ id: "excavate", label: "Excavate", render: () => <ExcavatePanel /> }];
+const TABS: Tab[] = [
+  { id: "excavate", label: "Excavate", render: () => <ExcavatePanel /> },
+  { id: "mutate", label: "Mutate", render: () => <MutatePanel /> },
+  { id: "chat", label: "Chat", render: () => <ChatPanel /> },
+  { id: "layers", label: "Fossil Layers", render: () => <FossilLayersPanel /> },
+  { id: "slide", label: "Slide Mutator", render: () => <SlideMutatePanel /> },
+  { id: "dataset", label: "Dataset", render: () => <DatasetPanel /> },
+  { id: "enrich", label: "Enrich", render: () => <EnrichPanel /> },
+  { id: "ingest", label: "Ingest", render: () => <IngestPanel /> },
+];
 
 export function App() {
   const [active, setActive] = useState(TABS[0].id);
