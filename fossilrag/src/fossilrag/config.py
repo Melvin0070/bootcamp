@@ -128,6 +128,9 @@ class Settings(BaseSettings):
     # --- Service ---------------------------------------------------------
     log_level: str = "INFO"
     service_name: str = "fossilrag"
+    # Optional API-key auth. Unset (default) = open, for local/demo. When set,
+    # every endpoint except / and /healthz requires a matching X-API-Key.
+    api_key: str | None = None
 
     @field_validator("pool_max_size")
     @classmethod

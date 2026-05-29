@@ -23,6 +23,7 @@ node_modules/
 
 # Terraform (infra/)
 .terraform/
+.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 crash.log

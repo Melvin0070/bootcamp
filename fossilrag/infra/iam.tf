@@ -68,9 +68,12 @@ resource "aws_iam_role_policy_attachment" "api_basic" {
 
 data "aws_iam_policy_document" "api" {
   statement {
-    sid       = "BedrockInvoke"
-    actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-    resources = ["*"] # cross-region inference profiles span regions; tighten to model ARNs in prod
+    sid     = "BedrockInvoke"
+    actions = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+    # Scoped to Bedrock model/inference-profile resources (not "*"). Defaults
+    # cover any foundation model + this account's cross-region inference
+    # profiles; tighten var.bedrock_invoke_resources to specific model ARNs.
+    resources = var.bedrock_invoke_resources
   }
   statement {
     sid       = "PromptCache"

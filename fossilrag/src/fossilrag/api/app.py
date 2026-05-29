@@ -19,6 +19,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from fossilrag import __version__
+from fossilrag.api.security import require_api_key
 from fossilrag.config import Settings, get_settings
 from fossilrag.dataset import build_pairs, to_jsonl
 from fossilrag.embedding import make_embedder
@@ -42,6 +43,7 @@ from fossilrag.models import (
     TimeTravelResponse,
 )
 from fossilrag.mutate import MOCK_NOTE
+from fossilrag.observability.middleware import RequestContextMiddleware
 from fossilrag.pipeline import ingest_document
 from fossilrag.timetravel import unified_fossil_diff, unified_text_diff
 from fossilrag.vectorstore import make_vector_store
@@ -83,7 +85,11 @@ app = FastAPI(
     version=__version__,
     summary="Serverless document enrichment & retrieval — the Dinosaur Whisperer's fossil excavator.",
     lifespan=lifespan,
+    # Global optional API-key gate (no-op unless FOSSILRAG_API_KEY is set).
+    dependencies=[Depends(require_api_key)],
 )
+# Correlation id + security headers + per-endpoint EMF latency/count metrics.
+app.add_middleware(RequestContextMiddleware)
 
 
 # -- dependency providers -------------------------------------------------

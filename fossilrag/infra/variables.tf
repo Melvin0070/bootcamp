@@ -51,3 +51,24 @@ variable "log_retention_days" {
   type        = number
   default     = 14
 }
+
+variable "alarm_email" {
+  description = "Optional email to subscribe to the CloudWatch alarm SNS topic (blank = none)."
+  type        = string
+  default     = ""
+}
+
+variable "api_latency_p99_threshold_ms" {
+  description = "API Gateway p99 latency (ms) above which the latency alarm fires."
+  type        = number
+  default     = 3000
+}
+
+variable "bedrock_invoke_resources" {
+  description = "ARNs the API role may bedrock:InvokeModel. Defaults to any foundation model + this account's inference profiles; tighten to specific model ARNs in prod."
+  type        = list(string)
+  default = [
+    "arn:aws:bedrock:*::foundation-model/*",
+    "arn:aws:bedrock:*:*:inference-profile/*",
+  ]
+}

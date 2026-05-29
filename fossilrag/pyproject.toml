@@ -93,6 +93,16 @@ exclude_also = [
     "@(abc\\.)?abstractmethod",
 ]
 
+[tool.bandit]
+# SAST config (CI `security` job runs `bandit -c pyproject.toml -r src/fossilrag`).
+# B608 (hardcoded SQL) fires on the pgvector store's multi-line f-string queries.
+# Audited safe and skipped repo-wide: the ONLY interpolated identifier is the
+# table name, sanitised by `_safe_ident()` (vectorstore/pgvector.py); every value
+# is bound via asyncpg `$N` placeholders — no user input reaches the SQL string.
+# (These are multi-line f-strings, so a per-line `# nosec` can't attach.) New SQL
+# must preserve that contract: identifiers via _safe_ident, values parameterised.
+skips = ["B608"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
