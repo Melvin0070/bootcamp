@@ -1,7 +1,8 @@
-# FossilRAG — Architecture (v0, walking skeleton)
+# FossilRAG — Architecture
 
-This document tracks the system as it stands. It grows with each PR; v0
-describes the spine shipped in PR0.
+The serverless document-enrichment & retrieval system, end to end. Built
+walking-skeleton-first across PR0–PR15 (the spine ran from PR0; each PR deepened
+one stage with `main` always demoable) — this describes the shipped system.
 
 ## Principles
 
@@ -27,17 +28,43 @@ describes the spine shipped in PR0.
 | vector | `embedding` (mock/local/Bedrock) + `vectorstore` | `(model_id, dim)` index | pluggable embedder; DynamoDB idempotency skip; pgvector |
 | served | `api` (+ `llm`, `enrichment`, `dataset`) | hits, summaries, layers, diffs, markers, chat, edits, datasets | `/excavate`; `/mutate`; `/timetravel`; `/diff`; `/enrich`+`/markers`; `/chat`; `/slide/mutate`; `/dataset` (JSONL fine-tune pairs) |
 
-## Component diagram (v0)
+## Serverless topology (deployed)
+
+```mermaid
+flowchart LR
+  subgraph Client
+    UI[React UI<br/>nginx + /api proxy]
+  end
+  UI -->|/api| APIGW[API Gateway HTTP API]
+  APIGW --> API[API Lambda<br/>Mangum + FastAPI<br/>provisioned concurrency + autoscale]
+
+  subgraph Ingestion (decoupled, burst-absorbing)
+    RAW[(S3 raw)] -->|ObjectCreated| SQS[SQS ingest]
+    SQS --> W[Worker Lambda<br/>partial-batch + retry]
+    SQS -. maxReceiveCount=5 .-> DLQ[SQS DLQ] --> DLQH[DLQ Lambda]
+    W --> SILVER[(S3 silver)]
+    W <--> IDEM[(DynamoDB<br/>idempotency)]
+  end
+
+  API --> PG[(Postgres + pgvector<br/>HNSW)]
+  API --> BR[Bedrock<br/>Titan embed + Claude]
+  API <--> CACHE[(DynamoDB<br/>prompt fossilization)]
+  API -. cloud-native option .-> AOSS[(OpenSearch Serverless)]
+
+  API & W & DLQH -->|EMF + X-Ray| CW[CloudWatch<br/>metrics · logs · alarms → SNS]
+```
+
+## Request flow
 
 ```
   POST /ingest ──► pipeline.ingest_document
-                      │
                       ├─ ingest.extract_document   (bytes → RawDocument)      [silver]
                       ├─ chunking.chunk_document    (RawDocument → Chunk[])    [gold]
                       ├─ embedding.Embedder.encode  (Chunk[] → float32[N,dim])
-                      └─ vectorstore.upsert_chunks  (idempotent on chunk_id)   [vector]
+                      └─ vectorstore.upsert_chunks  (idempotent, ON CONFLICT)  [vector]
 
   GET /excavate ──► embedder.encode_one(q) ──► vectorstore.search(qv, k) ──► ExcavateHit[]
+  (every request → RequestContextMiddleware: X-Request-ID + EMF RequestLatencyMs)
 ```
 
 ## Interfaces (the seams later PRs plug into)
