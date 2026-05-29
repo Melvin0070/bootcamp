@@ -1,0 +1,1389 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "FossilRAG",
+    "summary": "Serverless document enrichment & retrieval \u2014 the Dinosaur Whisperer's fossil excavator.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/": {
+      "get": {
+        "summary": "Root",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Root  Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "summary": "Healthz",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Healthz Healthz Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ingest": {
+      "post": {
+        "summary": "Ingest",
+        "description": "Ingest a document through the full spine and index its fossils.",
+        "operationId": "ingest_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/excavate": {
+      "get": {
+        "summary": "Excavate",
+        "description": "Embed the query and return the top-k nearest fossil chunks + metadata.",
+        "operationId": "excavate_excavate_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "Natural-language query.",
+              "title": "Q"
+            },
+            "description": "Natural-language query."
+          },
+          {
+            "name": "k",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "Number of fossils to return.",
+              "default": 5,
+              "title": "K"
+            },
+            "description": "Number of fossils to return."
+          },
+          {
+            "name": "source_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Scope to one document (optional).",
+              "title": "Source Id"
+            },
+            "description": "Scope to one document (optional)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExcavateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mutate": {
+      "post": {
+        "summary": "Mutate",
+        "description": "Retrieve relevant fossils and return an LLM summary/edit grounded in them.\n\nPrompt Fossilization: the (model, query, instruction, retrieved-fossils)\ntuple keys a cache; a repeat request is served from the cache instantly\n(``cached=True``) with no LLM call. The default ``mock`` provider keeps this\ncallable at $0; set ``llm_provider=bedrock`` for a real Claude summary.",
+        "operationId": "mutate_mutate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MutateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/timetravel": {
+      "get": {
+        "summary": "Timetravel",
+        "description": "Return a document's fossils at a chosen layer (Time-Travel Query).",
+        "operationId": "timetravel_timetravel_get",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Stable logical-document id.",
+              "title": "Source Id"
+            },
+            "description": "Stable logical-document id."
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Fossil layer; default = latest.",
+              "title": "Version"
+            },
+            "description": "Fossil layer; default = latest."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeTravelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/diff": {
+      "get": {
+        "summary": "Diff",
+        "description": "Show changes between two fossil layers of a document (Fossil Diff).",
+        "operationId": "diff_diff_get",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "title": "Source Id"
+            }
+          },
+          {
+            "name": "from_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "From Version"
+            }
+          },
+          {
+            "name": "to_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "To Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FossilDiffResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/enrich": {
+      "post": {
+        "summary": "Enrich",
+        "description": "Extract structured markers (dates/metrics/error codes) and persist them.\n\nAutomated Enrichment (use case #3): the markers become a fossil-layer-\nversioned structured record, retrievable via ``/markers``.",
+        "operationId": "enrich_enrich_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrichmentRecord"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/markers": {
+      "get": {
+        "summary": "Markers",
+        "description": "Return the stored enrichment record for a document layer.",
+        "operationId": "markers_markers_get",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "title": "Source Id"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrichmentRecord"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat": {
+      "post": {
+        "summary": "Chat",
+        "description": "Chat-Based Fossil Excavation: answer the latest turn, grounded in fossils.\n\nRetrieves for the latest user message (optionally scoped to one document),\nanswers via the LLM with the full conversation, and cites the fossils used\n(with geological age). Prompt Fossilization caches per (model, dialogue,\nretrieved fossils).",
+        "operationId": "chat_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/slide/mutate": {
+      "post": {
+        "summary": "Slide Mutate",
+        "description": "PowerPoint Slide Mutator: propose an edit + show the diff, with versioning.\n\nComposes the LLM (edit), Fossil Diff (original vs suggestion), and \u2014 when\n``persist`` + ``source_id`` are given \u2014 version tracking by saving the\nsuggestion as a new fossil layer (then visible via ``/timetravel`` & ``/diff``).",
+        "operationId": "slide_mutate_slide_mutate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlideMutateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlideMutateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dataset": {
+      "post": {
+        "summary": "Dataset",
+        "description": "Fine-Tuning Dataset Builder: JSONL instruction/response pairs from fossils.",
+        "operationId": "dataset_dataset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ChatMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage",
+        "description": "One turn of a Chat-Based Fossil Excavation conversation.\n\n``role`` is constrained to user/assistant so an invalid role is rejected at\nthe API validation layer (422) rather than forwarded to the LLM provider\n(which would surface as an opaque 502)."
+      },
+      "ChatRequest": {
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Messages"
+          },
+          "k": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "K",
+            "default": 5
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages"
+        ],
+        "title": "ChatRequest"
+      },
+      "ChatResponse": {
+        "properties": {
+          "answer": {
+            "type": "string",
+            "title": "Answer"
+          },
+          "model_id": {
+            "type": "string",
+            "title": "Model Id"
+          },
+          "mock": {
+            "type": "boolean",
+            "title": "Mock"
+          },
+          "cached": {
+            "type": "boolean",
+            "title": "Cached",
+            "default": false
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/ExcavateHit"
+            },
+            "type": "array",
+            "title": "Citations"
+          },
+          "latency_ms": {
+            "type": "number",
+            "title": "Latency Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answer",
+          "model_id",
+          "mock",
+          "citations",
+          "latency_ms"
+        ],
+        "title": "ChatResponse",
+        "description": "Assistant answer grounded in retrieved fossils, with citations."
+      },
+      "DatasetRequest": {
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Source Id"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "fmt": {
+            "type": "string",
+            "title": "Fmt",
+            "default": "chat"
+          },
+          "templates": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Templates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id"
+        ],
+        "title": "DatasetRequest"
+      },
+      "DatasetResponse": {
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "format": {
+            "type": "string",
+            "title": "Format"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "records": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Records"
+          },
+          "jsonl": {
+            "type": "string",
+            "title": "Jsonl"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "version",
+          "format",
+          "count",
+          "records",
+          "jsonl"
+        ],
+        "title": "DatasetResponse",
+        "description": "A fine-tuning dataset built from a fossil layer (records + JSONL)."
+      },
+      "EnrichmentRecord": {
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "doc_id": {
+            "type": "string",
+            "title": "Doc Id"
+          },
+          "layer_version": {
+            "type": "integer",
+            "title": "Layer Version"
+          },
+          "markers": {
+            "items": {
+              "$ref": "#/components/schemas/Marker"
+            },
+            "type": "array",
+            "title": "Markers"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Counts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "doc_id",
+          "layer_version",
+          "markers",
+          "counts"
+        ],
+        "title": "EnrichmentRecord",
+        "description": "A document layer's extracted markers \u2014 the structured enrichment record."
+      },
+      "ExcavateHit": {
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id"
+          },
+          "doc_id": {
+            "type": "string",
+            "title": "Doc Id"
+          },
+          "source_id": {
+            "type": "string",
+            "title": "Source Id",
+            "default": ""
+          },
+          "ordinal": {
+            "type": "integer",
+            "title": "Ordinal"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score",
+            "description": "Cosine similarity in [-1, 1]; higher is closer."
+          },
+          "layer_version": {
+            "type": "integer",
+            "title": "Layer Version"
+          },
+          "geological_age": {
+            "type": "string",
+            "title": "Geological Age"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunk_id",
+          "doc_id",
+          "ordinal",
+          "content",
+          "score",
+          "layer_version",
+          "geological_age"
+        ],
+        "title": "ExcavateHit",
+        "description": "A retrieved chunk plus its similarity score (served layer)."
+      },
+      "ExcavateResponse": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "k": {
+            "type": "integer",
+            "title": "K"
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/ExcavateHit"
+            },
+            "type": "array",
+            "title": "Hits"
+          },
+          "latency_ms": {
+            "type": "number",
+            "title": "Latency Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "k",
+          "hits",
+          "latency_ms"
+        ],
+        "title": "ExcavateResponse"
+      },
+      "FossilDiffResponse": {
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "from_version": {
+            "type": "integer",
+            "title": "From Version"
+          },
+          "to_version": {
+            "type": "integer",
+            "title": "To Version"
+          },
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "added_lines": {
+            "type": "integer",
+            "title": "Added Lines"
+          },
+          "removed_lines": {
+            "type": "integer",
+            "title": "Removed Lines"
+          },
+          "unified_diff": {
+            "type": "string",
+            "title": "Unified Diff"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "from_version",
+          "to_version",
+          "changed",
+          "added_lines",
+          "removed_lines",
+          "unified_diff"
+        ],
+        "title": "FossilDiffResponse",
+        "description": "Changes between two fossil layers of the same document."
+      },
+      "FossilLayerChunk": {
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id"
+          },
+          "doc_id": {
+            "type": "string",
+            "title": "Doc Id"
+          },
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "ordinal": {
+            "type": "integer",
+            "title": "Ordinal"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "layer_version": {
+            "type": "integer",
+            "title": "Layer Version"
+          },
+          "geological_age": {
+            "type": "string",
+            "title": "Geological Age"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunk_id",
+          "doc_id",
+          "source_id",
+          "ordinal",
+          "content",
+          "layer_version",
+          "geological_age"
+        ],
+        "title": "FossilLayerChunk",
+        "description": "One chunk of a specific fossil layer (served without its embedding)."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "IngestRequest": {
+        "properties": {
+          "filename": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Filename"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Text"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type",
+            "default": "text/plain"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "layer_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Layer Version",
+            "default": 1
+          }
+        },
+        "type": "object",
+        "required": [
+          "filename",
+          "text"
+        ],
+        "title": "IngestRequest"
+      },
+      "IngestResult": {
+        "properties": {
+          "doc_id": {
+            "type": "string",
+            "title": "Doc Id"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "chunks_total": {
+            "type": "integer",
+            "title": "Chunks Total"
+          },
+          "chunks_indexed": {
+            "type": "integer",
+            "title": "Chunks Indexed"
+          },
+          "layer_version": {
+            "type": "integer",
+            "title": "Layer Version"
+          },
+          "embed_model": {
+            "type": "string",
+            "title": "Embed Model"
+          },
+          "embed_dim": {
+            "type": "integer",
+            "title": "Embed Dim"
+          }
+        },
+        "type": "object",
+        "required": [
+          "doc_id",
+          "filename",
+          "chunks_total",
+          "chunks_indexed",
+          "layer_version",
+          "embed_model",
+          "embed_dim"
+        ],
+        "title": "IngestResult",
+        "description": "Summary returned by the ingestion pipeline / ``POST /ingest``."
+      },
+      "Marker": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "text"
+        ],
+        "title": "Marker",
+        "description": "A structured marker extracted from a document (Automated Enrichment)."
+      },
+      "MutateRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Query"
+          },
+          "k": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "K",
+            "default": 5
+          },
+          "instruction": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instruction"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "MutateRequest"
+      },
+      "MutateResponse": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "instruction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instruction"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "model_id": {
+            "type": "string",
+            "title": "Model Id"
+          },
+          "mock": {
+            "type": "boolean",
+            "title": "Mock"
+          },
+          "cached": {
+            "type": "boolean",
+            "title": "Cached",
+            "default": false
+          },
+          "used_chunks": {
+            "items": {
+              "$ref": "#/components/schemas/ExcavateHit"
+            },
+            "type": "array",
+            "title": "Used Chunks"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": ""
+          },
+          "latency_ms": {
+            "type": "number",
+            "title": "Latency Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "summary",
+          "model_id",
+          "mock",
+          "used_chunks",
+          "latency_ms"
+        ],
+        "title": "MutateResponse",
+        "description": "Result of ``/mutate``: a summary/edit grounded in retrieved fossils.\n\n``mock`` is True while the LLM is the PR0 placeholder; PR4 swaps in AWS\nBedrock (Converse API) + Prompt Fossilization behind a provider interface\nand flips it to False."
+      },
+      "SlideMutateRequest": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Text",
+            "description": "Slide text to revise."
+          },
+          "instruction": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Instruction"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "persist": {
+            "type": "boolean",
+            "title": "Persist",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "instruction"
+        ],
+        "title": "SlideMutateRequest"
+      },
+      "SlideMutateResponse": {
+        "properties": {
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "instruction": {
+            "type": "string",
+            "title": "Instruction"
+          },
+          "original": {
+            "type": "string",
+            "title": "Original"
+          },
+          "suggestion": {
+            "type": "string",
+            "title": "Suggestion"
+          },
+          "model_id": {
+            "type": "string",
+            "title": "Model Id"
+          },
+          "mock": {
+            "type": "boolean",
+            "title": "Mock"
+          },
+          "cached": {
+            "type": "boolean",
+            "title": "Cached",
+            "default": false
+          },
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "added_lines": {
+            "type": "integer",
+            "title": "Added Lines"
+          },
+          "removed_lines": {
+            "type": "integer",
+            "title": "Removed Lines"
+          },
+          "unified_diff": {
+            "type": "string",
+            "title": "Unified Diff"
+          },
+          "persisted_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persisted Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instruction",
+          "original",
+          "suggestion",
+          "model_id",
+          "mock",
+          "changed",
+          "added_lines",
+          "removed_lines",
+          "unified_diff"
+        ],
+        "title": "SlideMutateResponse",
+        "description": "PPTX Slide Mutator: an edit suggestion + the diff, with optional versioning."
+      },
+      "TimeTravelResponse": {
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "latest_version": {
+            "type": "integer",
+            "title": "Latest Version"
+          },
+          "available_versions": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Available Versions"
+          },
+          "is_latest": {
+            "type": "boolean",
+            "title": "Is Latest"
+          },
+          "chunks": {
+            "items": {
+              "$ref": "#/components/schemas/FossilLayerChunk"
+            },
+            "type": "array",
+            "title": "Chunks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "version",
+          "latest_version",
+          "available_versions",
+          "is_latest",
+          "chunks"
+        ],
+        "title": "TimeTravelResponse",
+        "description": "A document's fossils at a chosen layer + how it relates to the latest."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

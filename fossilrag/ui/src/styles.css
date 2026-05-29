@@ -1,0 +1,180 @@
+/* Placeholder styling — replaced by the frontend-design pass. Kept minimal but
+   legible so the skeleton renders sensibly before the visual system lands. */
+:root {
+  color-scheme: dark;
+  --bg: #14110d;
+  --surface: #1e1a14;
+  --border: #3a3127;
+  --text: #ece3d4;
+  --muted: #a7977f;
+  --accent: #d9a441;
+  font-family: system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 4rem;
+}
+
+.app__title {
+  margin: 0;
+  font-size: 1.6rem;
+}
+
+.app__title-accent {
+  color: var(--accent);
+}
+
+.app__tagline {
+  color: var(--muted);
+  margin: 0.25rem 0 1.5rem;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1.5rem;
+}
+
+.tab {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.tab--active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.panel__lede {
+  color: var(--muted);
+  margin-top: 0;
+}
+
+.form {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin-bottom: 1.5rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.field--grow {
+  flex: 1 1 16rem;
+}
+
+.field--narrow {
+  width: 6rem;
+}
+
+.field span {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  font: inherit;
+}
+
+button[type="submit"],
+.tab {
+  font: inherit;
+}
+
+button[type="submit"] {
+  background: var(--accent);
+  color: #14110d;
+  border: none;
+  border-radius: 6px;
+  padding: 0.55rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hits {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.fossil-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+
+.fossil-card__bar {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.4rem;
+}
+
+.fossil-card__score {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.fossil-card__content {
+  margin: 0;
+}
+
+.fossil-card__source {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.status {
+  color: var(--muted);
+  padding: 1rem 0;
+}
+
+.status--error {
+  color: #e6794b;
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 1rem;
+}
