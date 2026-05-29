@@ -57,4 +57,4 @@ across 16 focused PRs (PR0–PR15), each independently green on `main`.
 
 - **CI gates** (`fossilrag-ci.yml`): ruff · pytest matrix (3.12/3.13) on real pgvector + 85% coverage · `docker compose config` (3 profiles) + compose-e2e smoke · `bun` (Biome/typecheck/Vitest/build) · `terraform fmt+validate` · `bandit` (pip-audit/gitleaks/bun-audit advisory).
 - **$0-verified** everywhere: pgvector + mock embedder/LLM + moto + LocalStack-profile config.
-- **Plan-validated, never claimed "deployed"**: Bedrock + OpenSearch Serverless (no $0 emulation) — behind interfaces, IaC-validated. The `aws`/`ui` compose profiles + live AWS run are manual (documented), not CI-verified end-to-end.
+- **Plan-validated, never claimed "deployed"**: Bedrock (behind the Embedder/LLM interfaces) + OpenSearch Serverless (IaC-provisioned, not yet bound behind the VectorStore interface) — no $0 emulation, IaC-validated. The `aws`/`ui` compose profiles + live AWS run are manual (documented), not CI-verified end-to-end.

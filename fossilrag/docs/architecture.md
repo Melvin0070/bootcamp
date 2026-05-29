@@ -38,7 +38,7 @@ flowchart LR
   UI -->|/api| APIGW[API Gateway HTTP API]
   APIGW --> API[API Lambda<br/>Mangum + FastAPI<br/>provisioned concurrency + autoscale]
 
-  subgraph Ingestion (decoupled, burst-absorbing)
+  subgraph Ingestion["Ingestion (decoupled, burst-absorbing)"]
     RAW[(S3 raw)] -->|ObjectCreated| SQS[SQS ingest]
     SQS --> W[Worker Lambda<br/>partial-batch + retry]
     SQS -. maxReceiveCount=5 .-> DLQ[SQS DLQ] --> DLQH[DLQ Lambda]
@@ -73,8 +73,10 @@ flowchart LR
   Impls: `MockEmbedder` (PR0); `LocalEmbedder` (sentence-transformers, PR3);
   `BedrockEmbedder` (Titan v2, PR3).
 - `vectorstore.base.VectorStore` — `bootstrap`, `upsert_chunks`, `search`,
-  `healthcheck`, `close`, `stats`. Impls: `PgVectorStore` (PR0);
-  `FaissStore` (PR3); `OpenSearchStore` (PR3/PR11).
+  `healthcheck`, `close`, `stats`. Impl: `PgVectorStore` is the only shipped
+  backend. OpenSearch Serverless is IaC-provisioned (`infra/opensearch.tf`) but
+  not yet bound behind the interface — an `OpenSearchStore` is the documented
+  next step (see ADR 0001).
 
 ## Vector search (pgvector)
 
@@ -89,7 +91,7 @@ flowchart LR
 
 | Concern | Local ($0) | CI | Cloud (live) |
 |---------|-----------|-----|--------------|
-| Vector store | pgvector (compose) | pgvector service container | RDS/Aurora pgvector or AOSS |
+| Vector store | pgvector (compose) | pgvector service container | RDS/Aurora pgvector (AOSS provisioned, binding TBD) |
 | Embedder | mock / local | mock | Bedrock Titan v2 |
 | LLM (`/mutate`) | mock / Ollama | mock | Bedrock Claude (Converse) |
 | AWS services | moto (tests) / LocalStack (demo) | moto | real AWS |

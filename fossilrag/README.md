@@ -84,8 +84,9 @@ for local/demo). Every endpoint is also surfaced in the **React UI**
   **Bedrock Titan v2** (1024-dim) as the cloud default. Indexes are keyed by
   `(model_id, dim)` and never cross-queried — vectors from different models are
   incomparable even at equal dimensions.
-- **Vector store is pluggable**: **pgvector** (primary, tested + demoed),
-  **FAISS** (unit alternate), **OpenSearch Serverless** (cloud-native, IaC-validated).
+- **Vector store is behind one interface**: **pgvector** is the shipped backend
+  (tested + demoed). **OpenSearch Serverless** is IaC-provisioned (cloud-native
+  option), not yet bound behind the interface — the documented next step.
 - See [`docs/architecture.md`](docs/architecture.md) and the decision record
   [`docs/adr/0001-foundational-decisions.md`](docs/adr/0001-foundational-decisions.md).
 

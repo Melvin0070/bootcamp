@@ -11,10 +11,15 @@ make up-ui            # postgres(pgvector) + API + the React UI (nginx)
 # API  → http://localhost:8000   UI → http://localhost:5173
 ```
 
-## 1. Seed + excavate (Component 1–4)
+## 1. Ingest + excavate (Component 1–4)
 
 ```bash
-python -m scripts.seed                      # ingest the sample fossils
+python -m scripts.seed                      # ingest the bundled sample fossils
+# ingest a document we'll also time-travel in step 4 (layer v1):
+curl -s localhost:8000/ingest -H 'content-type: application/json' -d '{
+  "filename":"velociraptor.txt","source_id":"velociraptor.txt","layer_version":1,
+  "text":"Velociraptor was a small dromaeosaurid of the Late Cretaceous. A distinctive sickle-shaped claw on each foot is its best-known feature."
+}'
 curl 'localhost:8000/excavate?q=sickle-shaped+claw&k=3'
 ```
 Show the ranked **fossil cards**: cosine score, `geological_age`, `layer_version`,
@@ -38,8 +43,12 @@ UI **Chat** tab: ask "What's special about its foot?" → grounded answer with
 ## 4. Time-Travel + Fossil Diff (mutations)
 
 ```bash
-# re-ingest the same source at a new layer, then compare
-curl 'localhost:8000/timetravel?source_id=velociraptor.txt'      # latest layer + available versions
+# save a revised layer (v2) of the source ingested in step 1, then compare:
+curl -s localhost:8000/ingest -H 'content-type: application/json' -d '{
+  "filename":"velociraptor.txt","source_id":"velociraptor.txt","layer_version":2,
+  "text":"Velociraptor was a small, feathered dromaeosaurid of the Late Cretaceous. Its retractable, sickle-shaped second-toe claw is its best-known feature."
+}'
+curl 'localhost:8000/timetravel?source_id=velociraptor.txt'      # latest layer + available versions [1, 2]
 curl 'localhost:8000/diff?source_id=velociraptor.txt&from_version=1&to_version=2'
 ```
 UI **Fossil Layers** tab: time-travel to a layer, then diff two — the unified
