@@ -19,7 +19,9 @@ from fossilrag.models import ChatMessage, ExcavateHit
 
 log = get_logger("llm.openai")
 
-DEFAULT_MODEL = "gpt-4o-mini"
+# Verify current models at platform.openai.com/docs/models (or ai.google.dev for
+# Gemini). May 2026: OpenAI gpt-5.4-mini / gpt-5-mini; Gemini gemini-2.5-flash.
+DEFAULT_MODEL = "gpt-5-mini"
 
 
 class OpenAILLM:
@@ -31,15 +33,11 @@ class OpenAILLM:
         *,
         base_url: str | None = None,
         api_key: str | None = None,
-        max_tokens: int = 1024,
-        temperature: float = 0.2,
         client: Any = None,
     ) -> None:
         self._model_id = model_id
         self._base_url = base_url
         self._api_key = api_key
-        self._max_tokens = max_tokens
-        self._temperature = temperature
         self._client = client
 
     def _ensure_client(self):  # noqa: ANN202
@@ -57,10 +55,14 @@ class OpenAILLM:
     def _invoke(self, system_text: str, turns: list[dict]) -> LLMResult:
         messages = [{"role": "system", "content": system_text}]
         messages += [{"role": t["role"], "content": t["content"]} for t in turns]
+        # Send ONLY model + messages — the maximally portable request. Current
+        # reasoning models (OpenAI gpt-5.x, o-series) reject `max_tokens` (they
+        # want `max_completion_tokens`) and reject a non-default `temperature`,
+        # while Gemini's compat endpoint expects `max_tokens`; omitting both lets
+        # one provider work across OpenAI, Gemini, and Ollama unchanged. Output
+        # length is bounded by the "be concise" system prompt.
         resp = self._ensure_client().chat.completions.create(
             model=self._model_id,
-            max_tokens=self._max_tokens,
-            temperature=self._temperature,
             messages=messages,
         )
         # Defensive parse: tolerate an empty/missing choice or content.
