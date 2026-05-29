@@ -58,10 +58,11 @@ make e2e                      # up -> ingest -> excavate -> assert -> down
 | `GET`  | `/`         | Service info |
 
 `/mutate` defaults to a deterministic mock LLM (`mock: true`) so the full
-surface is callable at $0. For **real RAG that's still free**, flip to the
-OpenAI-compatible provider pointed at **Google Gemini** (its OpenAI-compat
-endpoint) — real semantic search *and* grounded summaries; see `.env.example`
-and [`docs/demo.md`](docs/demo.md). (Bedrock/OpenAI/Anthropic also supported.)
+surface is callable at $0. For **real RAG**, flip to the OpenAI-compatible
+provider — **OpenAI** (recommended; ~pennies for a demo) or **free Google
+Gemini** (+ local embeddings) — for real semantic search *and* grounded
+summaries; see `.env.example` + [`docs/demo.md`](docs/demo.md) (verify model
+names are current). (Bedrock/Anthropic also supported.)
 Optional API-key auth: set `FOSSILRAG_API_KEY` (off by default
 for local/demo). Nearly every endpoint is surfaced in the **React UI** (all but
 the read-only `GET /markers`) — `make up-ui` → http://localhost:5173.

@@ -137,7 +137,9 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("FOSSILRAG_OPENAI_API_KEY", "OPENAI_API_KEY"),
     )
     openai_base_url: str | None = None  # None = OpenAI default
-    openai_model: str = "gpt-4o-mini"  # LLM model (e.g. gemini-2.0-flash)
+    # Verify current models at platform.openai.com/docs/models (May 2026:
+    # gpt-5.4-mini / gpt-5-mini) or ai.google.dev (gemini-2.5-flash).
+    openai_model: str = "gpt-5-mini"
 
     # --- Prompt Fossilization (prompt/output cache mutation) -------------
     prompt_cache_backend: str = "memory"  # memory | local | dynamodb

@@ -27,13 +27,15 @@ Show the ranked **fossil cards**: cosine score, `geological_age`, `layer_version
 `source_id`. In the UI, the **Excavate** tab does the same with the stratigraphic
 card design.
 
-> **Real AI (free, recommended for the video).** The default is a deterministic
-> $0 mock. For genuinely semantic search + real grounded summaries, copy
-> `.env.example` → `.env`, uncomment the **Gemini (free)** block (set
-> `FOSSILRAG_OPENAI_API_KEY`), then `make down && make up-ui`. Now `/excavate`
-> ranks by meaning and `/mutate` + `/chat` return real Claude/Gemini answers —
-> still $0. (Swapping the embedder changes the vector space, hence `make down`
-> to start with a fresh index.)
+> **Real AI (recommended for the video).** The default is a deterministic $0
+> mock. For genuinely semantic search + real grounded summaries, copy
+> `.env.example` → `.env` and uncomment the **OpenAI** block (set
+> `FOSSILRAG_OPENAI_API_KEY`; a demo costs ~pennies) — or the **free Gemini +
+> local-embeddings** alternative — then `make down && make up-ui`. Now
+> `/excavate` ranks by meaning and `/mutate` + `/chat` return real answers.
+> Verify the model names are current first (platform.openai.com/docs/models).
+> (Swapping the embedder changes the vector space, hence `make down` for a fresh
+> index.)
 
 ## 2. Mutate + Prompt Fossilization (mutation)
 

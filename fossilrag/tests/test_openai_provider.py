@@ -54,6 +54,9 @@ def test_openai_llm_summarise_builds_grounded_messages():
     assert sent["model"] == "gemini-2.0-flash"
     assert sent["messages"][0]["role"] == "system"
     assert "sickle claw" in sent["messages"][-1]["content"]  # the fossil grounded the prompt
+    # Portable request: no max_tokens / temperature (current reasoning models
+    # reject them; Gemini wants max_tokens) — only model + messages are sent.
+    assert "max_tokens" not in sent and "temperature" not in sent
 
 
 def test_openai_llm_chat_and_edit():
