@@ -1,0 +1,26 @@
+title = "FossilRAG gitleaks config"
+
+# Start from gitleaks' built-in rules, then allowlist this repo's intentional,
+# non-secret demo/test values. There are NO real credentials in the repo: the
+# managed-Postgres DSN and AWS keys are supplied at deploy time via Secrets
+# Manager / the runtime environment (see infra/secrets.tf).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Intentional demo/test/non-secret values"
+# Files that only ever contain placeholders or local-dev defaults.
+paths = [
+  '''\.env\.example$''',
+  '''docker-compose\.yml$''',
+  '''terraform\.tfvars\.example$''',
+  '''(^|/)tests/''',
+  '''(^|/)(README|docs)''',
+]
+# Specific fake patterns that may appear in committed examples/compose/CI.
+regexTarget = "line"
+regexes = [
+  '''AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY)\s*[:=]\s*["']?test["']?''',
+  '''postgresql://(fossilrag:fossilrag|postgres:postgres)@''',
+  '''POSTGRES_PASSWORD\s*[:=]\s*(postgres|fossilrag)''',
+]
