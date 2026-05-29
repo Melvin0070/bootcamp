@@ -86,6 +86,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: validate compose (default + aws profiles)
+        run: |
+          docker compose config -q
+          docker compose --profile aws config -q
       - name: build + start the stack
         run: docker compose up -d --build
       - name: smoke (ingest -> excavate over real HTTP)
