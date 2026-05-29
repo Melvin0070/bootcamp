@@ -177,3 +177,48 @@ def test_sqs_handler_accepts_s3_event_notification_and_skips_test_event(tmp_path
             assert r["batchItemFailures"] == []
             keys = {o["Key"] for o in s3.list_objects_v2(Bucket="silver").get("Contents", [])}
             assert len(keys) == 1  # the S3-event object landed in silver
+
+
+class _FakeStore:
+    """Minimal async VectorStore stand-in capturing what the worker indexes."""
+
+    def __init__(self):
+        self.upserts = []
+
+    async def upsert_chunks(self, chunks, vectors):  # noqa: ANN001, ANN202
+        self.upserts.append((chunks, vectors))
+        return len(chunks)
+
+
+async def test_worker_index_object_writes_silver_and_indexes(tmp_path):
+    """worker_index mode runs the full pipeline per object: silver + embed+upsert
+    (so an S3 upload becomes searchable, not just silver)."""
+    pytest.importorskip("moto")
+    boto3 = pytest.importorskip("boto3")
+    from moto import mock_aws
+
+    from fossilrag.embedding.mock import MockEmbedder
+    from fossilrag.worker.sqs import _index_object
+
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="raw")
+        s3.create_bucket(Bucket="silver")
+        _put(
+            s3,
+            "dig/report.txt",
+            b"Velociraptor had a sickle claw.\n\nIt lived in the Late Cretaceous.",
+        )
+
+        store = _FakeStore()
+        embedder = MockEmbedder(model_id="mock", dimensions=384)
+        n = await _index_object(
+            s3, store, embedder, "raw", "dig/report.txt", silver_bucket="silver", prefix="silver"
+        )
+
+        assert n >= 1  # chunks produced
+        assert s3.list_objects_v2(Bucket="silver").get("Contents")  # silver written
+        assert store.upserts  # embedded + upserted into the vector store
+        chunks, vectors = store.upserts[0]
+        assert len(chunks) == n
+        assert vectors.shape == (n, 384)
